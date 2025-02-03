@@ -7,8 +7,7 @@ from app import main as web_scrapping_app
 def dashboard():
     st.header("📌 SURAKSHYA INVESTMENTS \nFinancial Dashboard")
     st.write("Welcome to the Financial Analysis Suite of Surakdhya Investments! Use the navigation bar to explore different features.")
-    st.image("https://via.placeholder.com/800x300?text=Financial+Dashboard")
-
+    st.image("surakshya.png",use_column_width=True)
 # Custom CSS for styling
 st.markdown("""
     <style>
