@@ -1,0 +1,12 @@
+DATE,Secror,Positive,Neutral,Negative,Sentiment Strength,Sentiment_Strength
+1970-01-01 00:00:00,Nepse,25.0,25.0,50.0,Weak,Weak
+1970-01-01 00:00:00,Nepse,50.0,25.0,25.0,Mid,Strong
+1970-01-01 00:00:00,Nepse,60.0,44.0,12.0,No Sentiment,Strong
+1970-01-01 00:00:00,Nepse,67.0,44.0,12.0,No Sentiment,Strong
+1970-01-01 00:00:00,Nepse,55.0,0.0,0.0,No Sentiment,Strong
+1970-01-01 00:00:00,Nepse,55.0,0.0,0.0,No Sentiment,Strong
+2024-10-24 01:20:24,,55.0,55.0,55.0,,Mid
+2025-01-18 01:49:10,Npwse,55.0,44.0,1.0,,Strong
+2025-02-12 20:24:48,Nepse,70.0,22.0,38.0,,
+2025-12-02 11:11:11,Nepse,79.0,11.0,90.0,,
+2025-02-03 00:58:49,Nepse,10.0,3.0,80.0,,
