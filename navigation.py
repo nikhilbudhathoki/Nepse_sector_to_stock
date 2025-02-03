@@ -1,15 +1,32 @@
 import streamlit as st 
+
+# Placeholder functions for missing modules
+def dummy_main():
+    st.write("Function not implemented")
+
+# Import main modules with fallback to dummy functions
 from main3 import main as sentiment_analysis
-from main2 import main as sector_value_analysis
-from main import main as calculator
-from app import main as web_scrapping_app
+try:
+    from main2 import main as sector_value_analysis
+except ImportError:
+    sector_value_analysis = dummy_main
+
+try:
+    from main import main as calculator
+except ImportError:
+    calculator = dummy_main
+
+try:
+    from app import main as web_scrapping_app
+except ImportError:
+    web_scrapping_app = dummy_main
 
 def init_navigation_state():
     """Initialize all navigation-related session state variables"""
     if "slide" not in st.session_state:
         st.session_state.slide = 0
-    # Remove raw_data and edited_data initialization from here
-    # as they're now handled in main3.py
+    if "raw_data" not in st.session_state:
+        st.session_state.raw_data = None
 
 def dashboard():
     """Render the main dashboard page"""
@@ -114,7 +131,11 @@ def load_css():
 def main():
     """Main function to run the application"""
     try:
-        
+        st.set_page_config(
+            page_title="Surakshya Investments",
+            page_icon="📊",
+            layout="wide"
+        )
         init_navigation_state()
         load_css()
         render_navigation()
