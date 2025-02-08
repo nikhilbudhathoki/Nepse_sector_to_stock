@@ -1,4 +1,4 @@
-import streamlit as st 
+import streamlit as st
 
 # Placeholder functions for missing modules
 def dummy_main():
@@ -21,6 +21,12 @@ try:
 except ImportError:
     web_scrapping_app = dummy_main
 
+# Import the new module from pos.py
+try:
+    from pos import main as pos_analysis
+except ImportError:
+    pos_analysis = dummy_main
+
 def init_navigation_state():
     """Initialize all navigation-related session state variables"""
     if "slide" not in st.session_state:
@@ -39,7 +45,8 @@ NAV_ITEMS = {
     1: {"title": "📈 Sentiment Analysis", "icon": "💬"},
     2: {"title": "🏦 Sector Analysis", "icon": "📊"},
     3: {"title": "🌐 Calculator", "icon": "🕷️"},
-    4: {"title": "🔍 Web Scraping App", "icon": "🌍"}
+    4: {"title": "🔍 Web Scraping App", "icon": "🌍"},
+    5: {"title": "📊 POS Analysis", "icon": "📈"}  # New navigation item
 }
 
 def render_navigation():
@@ -79,6 +86,9 @@ def render_content():
         elif st.session_state.slide == 4:
             st.header("Web Scraping Application")
             web_scrapping_app()
+        elif st.session_state.slide == 5:  # New page for POS Analysis
+            st.header("POS Analysis")
+            pos_analysis()
     except Exception as e:
         st.error(f"Error loading content: {str(e)}")
         st.error("Please try refreshing the page or contact support if the issue persists.")
