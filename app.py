@@ -6,8 +6,14 @@ import os
 import logging
 from datetime import datetime, timedelta
 import plotly.express as px
-import sqlite3
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', filename='stock_tracker.log', filemode='a')
+
+# Enhanced Logging Configuration
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    filename='stock_tracker.log',
+    filemode='a'
+)
 
 class StockDataManager:
     def __init__(self, base_dir='stock_data'):
@@ -31,11 +37,13 @@ class StockDataManager:
         ]
 
     def _create_directories(self):
+        """Create directories for storing raw, processed, and historical data."""
         directories = ['raw_data', 'processed_data', 'top_performers', 'historical_analysis']
         for dir_name in directories:
             os.makedirs(os.path.join(self.base_dir, dir_name), exist_ok=True)
 
     def scrape_stock_data(self):
+        """Scrape stock data from Sharesansar."""
         try:
             url = "https://www.sharesansar.com/live-trading"
             headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
@@ -73,108 +81,26 @@ class StockDataManager:
             return None, None
 
     def process_stock_data(self, df, change_threshold=4):
+        """Process stock data to identify top performers."""
         try:
             df.columns = df.columns.str.strip()
             
             # Identify the correct % change column
-            change_col = [col for col in df.columns if '% change' in col.lower()][0]  # Ensure this matches the column name
+            change_col = [col for col in df.columns if '% change' in col.lower()][0]
             volume_col = [col for col in df.columns if 'volume' in col.lower()][0]
             stock_col = [col for col in df.columns if 'symbol' in col.lower() or 'stock' in col.lower() or 'scrip' in col.lower()][0]
 
-            # Clean and convert % change column to numeric
+            # Clean and convert % change and volume columns
             df[change_col] = pd.to_numeric(df[change_col].str.replace('%', ''), errors='coerce')
             df[volume_col] = pd.to_numeric(df[volume_col].str.replace(',', ''), errors='coerce')
 
-            # Filter rows with % change > 4% (positive change only)
-            high_change_df = df[df[change_col] >= change_threshold]
-            
-            # Sort by % change in descending order
-            high_change_df = high_change_df.sort_values(by=change_col, ascending=False)
-            
-            # Count the number of stocks with % change > 4%
-            num_high_change_stocks = len(high_change_df)
-            
-            # Calculate the percentage relative to 244 stocks
-            percentage_high_change = (num_high_change_stocks / 244) * 100
-            
-            # Display the result for > 4% change
-            st.subheader("Stocks with > 4% Change")
-            st.write(f"Number of stocks with > {change_threshold}% change: {num_high_change_stocks}")
-            st.write(f"Percentage of stocks with > {change_threshold}% change: {percentage_high_change:.2f}%")
-
-            # Display the sorted table of stocks with > 4% change
-            st.write("Stocks with > 4% Change (Sorted by % Change):")
-            st.dataframe(high_change_df[[stock_col, change_col, volume_col]])
-
-            # Filter rows with % change < -4% (negative change only)
-            low_change_df = df[df[change_col] <= -change_threshold]
-            
-            # Sort by % change in ascending order (most negative first)
-            low_change_df = low_change_df.sort_values(by=change_col, ascending=True)
-            
-            # Count the number of stocks with % change < -4%
-            num_low_change_stocks = len(low_change_df)
-            
-            # Calculate the percentage relative to 244 stocks
-            percentage_low_change = (num_low_change_stocks / 244) * 100
-            
-            # Display the result for < -4% change
-            st.subheader("Stocks with < -4% Change")
-            st.write(f"Number of stocks with < -{change_threshold}% change: {num_low_change_stocks}")
-            st.write(f"Percentage of stocks with < -{change_threshold}% change: {percentage_low_change:.2f}%")
-
-            # Display the sorted table of stocks with < -4% change
-            st.write("Stocks with <= -4% Change (Sorted by % Change):")
-            st.dataframe(low_change_df[[stock_col, change_col, volume_col]])
-
-            # Filter rows with % change > 2.5% (positive change only)
-            high_change_2_5_df = df[df[change_col] >= 2.5]
-            
-            # Sort by % change in descending order
-            high_change_2_5_df = high_change_2_5_df.sort_values(by=change_col, ascending=False)
-            
-            # Count the number of stocks with % change > 2.5%
-            num_high_change_2_5_stocks = len(high_change_2_5_df)
-            
-            # Calculate the percentage relative to 244 stocks
-            percentage_high_change_2_5 = (num_high_change_2_5_stocks / 244) * 100
-            
-            # Display the result for > 2.5% change
-            st.subheader("Stocks with > 2.5% Change")
-            st.write(f"Number of stocks with > 2.5% change: {num_high_change_2_5_stocks}")
-            st.write(f"Percentage of stocks with > 2.5% change: {percentage_high_change_2_5:.2f}%")
-
-            # Display the sorted table of stocks with > 2.5% change
-            st.write("Stocks with > 2.5% Change (Sorted by % Change):")
-            st.dataframe(high_change_2_5_df[[stock_col, change_col, volume_col]])
-
-            # Filter rows with % change < -2.5% (negative change only)
-            low_change_2_5_df = df[df[change_col] <= -2.5]
-            
-            # Sort by % change in ascending order (most negative first)
-            low_change_2_5_df = low_change_2_5_df.sort_values(by=change_col, ascending=True)
-            
-            # Count the number of stocks with % change < -2.5%
-            num_low_change_2_5_stocks = len(low_change_2_5_df)
-            
-            # Calculate the percentage relative to 244 stocks
-            percentage_low_change_2_5 = (num_low_change_2_5_stocks / 244) * 100
-            
-            # Display the result for < -2.5% change
-            st.subheader("Stocks with < -2.5% Change")
-            st.write(f"Number of stocks with < -2.5% change: {num_low_change_2_5_stocks}")
-            st.write(f"Percentage of stocks with < -2.5% change: {percentage_low_change_2_5:.2f}%")
-
-            # Display the sorted table of stocks with < -2.5% change
-            st.write("Stocks with < -2.5% Change (Sorted by % Change):")
-            st.dataframe(low_change_2_5_df[[stock_col, change_col, volume_col]])
-
-            # Continue with the original processing for top performers
+            # Filter rows with % change > threshold
             filtered_df = df[
                 (df[change_col] >= change_threshold) & 
                 (df[volume_col] > df[volume_col].median())
             ].copy()
 
+            # Normalize data and calculate performance score
             filtered_df['Normalized_Change'] = (filtered_df[change_col] - filtered_df[change_col].min()) / (filtered_df[change_col].max() - filtered_df[change_col].min())
             filtered_df['Normalized_Volume'] = (filtered_df[volume_col] - filtered_df[volume_col].min()) / (filtered_df[volume_col].max() - filtered_df[volume_col].min())
             filtered_df['Performance_Score'] = 0.6 * filtered_df['Normalized_Change'] + 0.4 * filtered_df['Normalized_Volume']
@@ -186,6 +112,7 @@ class StockDataManager:
             return pd.DataFrame()
 
     def save_stock_data(self, df, data_type='raw', selected_date=None):
+        """Save stock data to CSV files."""
         if selected_date:
             date_str = selected_date.strftime("%Y-%m-%d")
         else:
@@ -198,6 +125,7 @@ class StockDataManager:
         return filename
 
 def load_saved_data(data_type='raw'):
+    """Load saved data from CSV files."""
     try:
         data_dir = os.path.join('stock_data', f'{data_type}_data')
         available_dates = [d for d in os.listdir(data_dir) if os.path.isdir(os.path.join(data_dir, d))]
@@ -238,9 +166,16 @@ def main():
                     st.subheader("📊 Complete Stock Data (Without Excluded Symbols)")
                     st.dataframe(df_filtered)
                     
+                    # Save raw data
+                    raw_filename = manager.save_stock_data(df_filtered, 'raw', scraped_date)
+                    st.success(f"Raw data saved to: {raw_filename}")
+                    
+                    # Process and save top performers
                     top_performers = manager.process_stock_data(df_filtered, change_threshold)
                     if not top_performers.empty:
-                        manager.save_stock_data(top_performers, 'processed', scraped_date)
+                        processed_filename = manager.save_stock_data(top_performers, 'processed', scraped_date)
+                        st.success(f"Processed data saved to: {processed_filename}")
+                        
                         st.subheader("🏆 Top Stock Performers")
                         st.dataframe(top_performers)
                         
@@ -254,7 +189,6 @@ def main():
                     st.error("Failed to fetch stock data")
 
     with tab2:
-        
         st.subheader("📂 View Saved Data")
         data_type = st.radio("Select Data Type", ['raw', 'processed'])
 
@@ -264,97 +198,78 @@ def main():
             st.dataframe(df)
 
             if data_type == 'raw':
-                # Reuse the process_stock_data method to analyze historical raw data
-                st.subheader("🔍 Analyze Historical Data")
+                # Enhanced analysis for historical raw data
+                st.subheader("🔍 Detailed Historical Analysis")
 
-                # Ensure the DataFrame has the required columns
-                if '% Change' not in df.columns:
-                    st.error("The loaded data does not contain a '% Change' column. Please check the data format.")
-                else:
-                    # Identify columns dynamically
-                    stock_col = [col for col in df.columns if 'symbol' in col.lower() or 'stock' in col.lower() or 'scrip' in col.lower()][0]
-                    change_col = [col for col in df.columns if '% change' in col.lower()][0]
-                    volume_col = [col for col in df.columns if 'volume' in col.lower()][0]
+                # Dynamically identify columns
+                stock_col = [col for col in df.columns if 'symbol' in col.lower() or 'stock' in col.lower() or 'scrip' in col.lower()][0]
+                change_col = [col for col in df.columns if '% change' in col.lower()][0]
+                volume_col = [col for col in df.columns if 'volume' in col.lower()][0]
 
-                    # Clean and convert % change and volume columns
-                    if df[change_col].dtype == 'object':  # Check if the column is of string type
-                        df[change_col] = pd.to_numeric(df[change_col].str.replace('%', ''), errors='coerce')
-                    else:
-                        df[change_col] = pd.to_numeric(df[change_col], errors='coerce')
+                # Clean and convert columns
+                df[change_col] = pd.to_numeric(df[change_col].astype(str).str.replace('%', ''), errors='coerce')
+                df[volume_col] = pd.to_numeric(df[volume_col].astype(str).str.replace(',', ''), errors='coerce')
 
-                    if df[volume_col].dtype == 'object':  # Check if the column is of string type
-                        df[volume_col] = pd.to_numeric(df[volume_col].str.replace(',', ''), errors='coerce')
-                    else:
-                        df[volume_col] = pd.to_numeric(df[volume_col], errors='coerce')
+                # Analysis sections
+                analysis_thresholds = [
+                    (4.0, -4.0, "4%"),
+                    (2.5, -2.5, "2.5%")
+                ]
 
-                    # Display stocks with > 4% change
-                    high_change_df = df[df[change_col] >= 4]
-                    num_high_change_stocks = len(high_change_df)
-                    percentage_high_change = (num_high_change_stocks / 244) * 100
-                    st.subheader("Stocks with > 4% Change")
-                    st.write(f"Number of stocks with > 4% change: {num_high_change_stocks}")
-                    st.write(f"Percentage of stocks with > 4% change: {percentage_high_change:.2f}%")
-                    st.write("Stocks with > 4% Change (Sorted by % Change):")
-                    st.dataframe(high_change_df[[stock_col, change_col, volume_col]].sort_values(change_col, ascending=False))
+                for pos_th, neg_th, label in analysis_thresholds:
+                    # Positive change analysis
+                    high_change_df = df[df[change_col] >= pos_th]
+                    num_high = len(high_change_df)
+                    pct_high = (num_high / 244) * 100
+                    
+                    st.subheader(f"Stocks with > {label} Change")
+                    cols = st.columns(2)
+                    cols[0].metric(f"Stocks > {label}", num_high)
+                    cols[1].metric(f"Percentage > {label}", f"{pct_high:.2f}%")
+                    st.dataframe(
+                        high_change_df[[stock_col, change_col, volume_col]]
+                        .sort_values(change_col, ascending=False)
+                        .style.format({change_col: "{:.2f}%", volume_col: "{:,}"})
+                    )
 
-                    # Display stocks with < -4% change
-                    low_change_df = df[df[change_col] <= -4]
-                    num_low_change_stocks = len(low_change_df)
-                    percentage_low_change = (num_low_change_stocks / 244) * 100
-                    st.subheader("Stocks with < -4% Change")
-                    st.write(f"Number of stocks with < -4% change: {num_low_change_stocks}")
-                    st.write(f"Percentage of stocks with < -4% change: {percentage_low_change:.2f}%")
-                    st.write("Stocks with <= -4% Change (Sorted by % Change):")
-                    st.dataframe(low_change_df[[stock_col, change_col, volume_col]].sort_values(change_col, ascending=True))
+                    # Negative change analysis
+                    low_change_df = df[df[change_col] <= -neg_th]
+                    num_low = len(low_change_df)
+                    pct_low = (num_low / 244) * 100
+                    
+                    st.subheader(f"Stocks with < -{label} Change")
+                    cols = st.columns(2)
+                    cols[0].metric(f"Stocks < -{label}", num_low)
+                    cols[1].metric(f"Percentage < -{label}", f"{pct_low:.2f}%")
+                    st.dataframe(
+                        low_change_df[[stock_col, change_col, volume_col]]
+                        .sort_values(change_col, ascending=True)
+                        .style.format({change_col: "{:.2f}%", volume_col: "{:,}"})
+                    )
 
-                    # Display stocks with > 2.5% change
-                    high_change_2_5_df = df[df[change_col] >= 2.5]
-                    num_high_change_2_5_stocks = len(high_change_2_5_df)
-                    percentage_high_change_2_5 = (num_high_change_2_5_stocks / 244) * 100
-                    st.subheader("Stocks with > 2.5% Change")
-                    st.write(f"Number of stocks with > 2.5% change: {num_high_change_2_5_stocks}")
-                    st.write(f"Percentage of stocks with > 2.5% change: {percentage_high_change_2_5:.2f}%")
-                    st.write("Stocks with > 2.5% Change (Sorted by % Change):")
-                    st.dataframe(high_change_2_5_df[[stock_col, change_col, volume_col]].sort_values(change_col, ascending=False))
-
-                    # Display stocks with < -2.5% change
-                    low_change_2_5_df = df[df[change_col] <= -2.5]
-                    num_low_change_2_5_stocks = len(low_change_2_5_df)
-                    percentage_low_change_2_5 = (num_low_change_2_5_stocks / 244) * 100
-                    st.subheader("Stocks with < -2.5% Change")
-                    st.write(f"Number of stocks with < -2.5% change: {num_low_change_2_5_stocks}")
-                    st.write(f"Percentage of stocks with < -2.5% change: {percentage_low_change_2_5:.2f}%")
-                    st.write("Stocks with < -2.5% Change (Sorted by % Change):")
-                    st.dataframe(low_change_2_5_df[[stock_col, change_col, volume_col]].sort_values(change_col, ascending=True))
-
-                    # Calculate performance scores for top performers
-                    filtered_df = df[
-                        (df[change_col] >= 4) &  # Use fixed threshold for consistency
-                        (df[volume_col] > df[volume_col].median())
-                    ].copy()
+                # Performance score calculation
+                filtered_df = df[
+                    (df[change_col] >= 4) & 
+                    (df[volume_col] > df[volume_col].median())
+                ].copy()
+                if not filtered_df.empty:
                     filtered_df['Normalized_Change'] = (filtered_df[change_col] - filtered_df[change_col].min()) / (filtered_df[change_col].max() - filtered_df[change_col].min())
                     filtered_df['Normalized_Volume'] = (filtered_df[volume_col] - filtered_df[volume_col].min()) / (filtered_df[volume_col].max() - filtered_df[volume_col].min())
                     filtered_df['Performance_Score'] = 0.6 * filtered_df['Normalized_Change'] + 0.4 * filtered_df['Normalized_Volume']
 
-                    # Display top performers
-                    st.subheader("🏆 Top Performers (Historical)")
+                    st.subheader("🏆 Historical Top Performers")
                     top_performers = filtered_df.sort_values('Performance_Score', ascending=False).head(10)
                     st.dataframe(top_performers)
 
-                    # Visualize top performers
-                    st.subheader("📊 Top Performers Visualization (Historical)")
-                    fig = px.bar(top_performers, x=stock_col, y='Performance_Score', title="Top Performers by Performance Score")
-                    st.plotly_chart(fig)
             elif data_type == 'processed':
-                # Display processed data directly
                 st.subheader("🏆 Top Performers")
                 top_performers = df.head(10)
                 st.dataframe(top_performers)
 
-                st.subheader("📈 Top Performers Visualization")
-                stock_col = [col for col in top_performers.columns if 'symbol' in col.lower() or 'stock' in col.lower() or 'scrip' in col.lower()][0]
-                fig = px.bar(top_performers, x=stock_col, y='Performance_Score', title="Top Performers by Performance Score")
+                st.subheader("📈 Performance Distribution")
+                fig = px.histogram(df, x='Performance_Score', nbins=20, title="Performance Score Distribution")
                 st.plotly_chart(fig)
+
     if st.sidebar.checkbox("Show Detailed Logs"):
         try:
             with open('stock_tracker.log', 'r') as log_file:
