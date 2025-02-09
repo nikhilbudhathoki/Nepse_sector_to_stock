@@ -5,7 +5,6 @@ def dummy_main():
     st.write("Function not implemented")
 
 # Import main modules with fallback to dummy functions
-from main3 import main as sentiment_analysis
 try:
     from main2 import main as sector_value_analysis
 except ImportError:
@@ -21,11 +20,11 @@ try:
 except ImportError:
     web_scrapping_app = dummy_main
 
-# Import the new module from pos.py
 try:
     from pos import main as pos_analysis
 except ImportError:
     pos_analysis = dummy_main
+
 
 def init_navigation_state():
     """Initialize all navigation-related session state variables"""
@@ -34,20 +33,22 @@ def init_navigation_state():
     if "raw_data" not in st.session_state:
         st.session_state.raw_data = None
 
+
 def dashboard():
     """Render the main dashboard page"""
     st.header("📌 SURAKSHYA INVESTMENTS \nFinancial Dashboard")
     st.write("Welcome to the Financial Analysis Suite of Surakdhya Investments! Use the navigation bar to explore different features.")
 
+
 # Navigation configuration
 NAV_ITEMS = {
     0: {"title": "📌 Dashboard", "icon": "🏠"},
-    1: {"title": "📈 Sentiment Analysis", "icon": "💬"},
-    2: {"title": "🏦 Sector Analysis", "icon": "📊"},
-    3: {"title": "🌐 Calculator", "icon": "🕷️"},
-    4: {"title": "🔍 Web Scraping App", "icon": "🌍"},
-    5: {"title": "📊 POS Analysis", "icon": "📈"}  # New navigation item
+    1: {"title": "🏦 Sector Analysis", "icon": "📊"},
+    2: {"title": "🌐 Calculator", "icon": "🧮"},
+    3: {"title": "🔍 Web Scraping App", "icon": "🌍"},
+    4: {"title": "📊 POS Analysis", "icon": "📈"}  # Adjusted indexes
 }
+
 
 def render_navigation():
     """Render the navigation bar"""
@@ -63,11 +64,8 @@ def render_navigation():
                 key=f"nav_{key}",
                 use_container_width=True
             ):
-                # Clear specific states when changing pages
-                if st.session_state.slide != key:
-                    if 'sentiment_data' in st.session_state:
-                        del st.session_state.sentiment_data
                 st.session_state.slide = key
+
 
 def render_content():
     """Render the main content based on selected navigation item"""
@@ -75,23 +73,21 @@ def render_content():
         if st.session_state.slide == 0:
             dashboard()
         elif st.session_state.slide == 1:
-            st.header("Sentiment Analysis Insights")
-            sentiment_analysis()
-        elif st.session_state.slide == 2:
             st.header("Sector Valuation Metrics")
             sector_value_analysis()
-        elif st.session_state.slide == 3:
+        elif st.session_state.slide == 2:
             st.header("Web Data Acquisition")
             calculator()
-        elif st.session_state.slide == 4:
+        elif st.session_state.slide == 3:
             st.header("Web Scraping Application")
             web_scrapping_app()
-        elif st.session_state.slide == 5:  # New page for POS Analysis
+        elif st.session_state.slide == 4:
             st.header("POS Analysis")
             pos_analysis()
     except Exception as e:
         st.error(f"Error loading content: {str(e)}")
         st.error("Please try refreshing the page or contact support if the issue persists.")
+
 
 def render_footer():
     """Render the navigation footer"""
@@ -99,17 +95,12 @@ def render_footer():
     with col1:
         if st.session_state.slide > 0:
             if st.button("◀ Previous Section"):
-                # Clear specific states when changing pages
-                if 'sentiment_data' in st.session_state:
-                    del st.session_state.sentiment_data
                 st.session_state.slide -= 1
     with col3:
         if st.session_state.slide < len(NAV_ITEMS) - 1:
             if st.button("Next Section ▶"):
-                # Clear specific states when changing pages
-                if 'sentiment_data' in st.session_state:
-                    del st.session_state.sentiment_data
                 st.session_state.slide += 1
+
 
 def load_css():
     """Load custom CSS styles"""
@@ -138,6 +129,7 @@ def load_css():
         </style>
     """, unsafe_allow_html=True)
 
+
 def main():
     """Main function to run the application"""
     try:
@@ -156,6 +148,7 @@ def main():
     except Exception as e:
         st.error(f"An unexpected error occurred: {str(e)}")
         st.error("Please try refreshing the page or contact support.")
+
 
 if __name__ == "__main__":
     main()
