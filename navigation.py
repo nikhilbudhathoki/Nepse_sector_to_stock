@@ -1,5 +1,5 @@
 import streamlit as st
-from main3 import main as sentiment_analysis
+from pos import main as POS
 from main2 import main as sector_value_analysis
 from main import main as calculator
 from app import main as web_scrapping_app
@@ -77,7 +77,7 @@ st.markdown("""
 # Navigation configuration
 NAV_ITEMS = {
     0: {"title": "Dashboard", "icon": "🏠"},
-    1: {"title": "Sentiment", "icon": "💬"},
+    1: {"title": "POS", "icon": "💬"},
     2: {"title": "Sectors", "icon": "📊"},
     3: {"title": "Calculator", "icon": "🧮"},
     4: {"title": "Web Data", "icon": "🌐"},
@@ -105,7 +105,7 @@ def render_nav():
 def render_page():
     pages = [
         dashboard,
-        lambda: sentiment_analysis(),
+        lambda: POS(),
         lambda: sector_value_analysis(),
         lambda: calculator(),
         lambda: web_scrapping_app(),
