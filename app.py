@@ -6,222 +6,199 @@ import os
 import logging
 from datetime import datetime, timedelta
 import plotly.express as px
-import sqlite3
-from sqlite3 import Error
-import hashlib
 
-# Configuration
-DATABASE_PATH = "nepse_stock_data.db"  # Persistent SQLite database
-LOG_FILE = "stock_tracker.log"  # Log file for debugging
-EXCLUDED_SYMBOLS = [
-    "SEF", "NICGF", "CMF1", "NBF2", "SIGS2", "CMF2", "NICBF", "NMB50", 
-    # Add all your excluded symbols here
-]
-
-# Initialize logging
+# Enhanced Logging Configuration
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    filename=LOG_FILE,
-    filemode="a",
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    filename='stock_tracker.log',
+    filemode='a'
 )
 
 class StockDataManager:
-    def __init__(self):
-        """Initialize database and ensure tables exist."""
-        self.conn = self._init_db()
-        self._create_tables()
+    def __init__(self, base_dir='stock_data'):
+        self.base_dir = base_dir
+        self._create_directories()
+        self.excluded_symbols = [
+            "SEF", "NICGF", "CMF1", "NBF2", "SIGS2", "CMF2", "NICBF", "NMB50", "SFMF", "LUK", "SLCF", 
+            "KEF", "SBCF", "PSF", "NIBSF2", "NICSF", "RMF1", "MMF1", "NBF3", "NICFC", "KDBY", "GIBF1",
+            "NSIF2", "NIBLGF", "SAGF", "SFEF", "PRSF", "RMF2", "SIGS3", "C30MF", "LVF2", "H8020",
+            "NICGF2", "KSY", "NIBLSTF", "MNMF1",
+            # Debentures
+            "NICAD85/86", "SAND2085", "NMBD2085", "NIBD2082", "NBBD2085", "SBLD83", "MBLD2085",
+            "NICD83/84", "NICAD8283", "SBLD2082", "HBLD83", "PBLD86", "SRBLD83", "LBLD86", "ICFCD83",
+            "GWFD83", "KBLD86", "ADBLD83", "CIZBD86", "SBIBD86", "NBLD82", "PBLD84", "SBLD84", "SBD87",
+            "NIBD84", "MFLD85", "NCCD86", "KSBBLD87", "NBLD87", "ADBLB", "BOKD86", "PBLD87", "NMBD87/88",
+            "NMBEB92/93", "MND84/85", "LBLD88", "PBD85", "SDBD87", "MBLD87", "NICD88", "RBBD83", 
+            "GBILD86/87", "JBBD87", "NBLD85", "ADBLB86", "ADBLB87", "GBBBD85", "CBLD88", "EBLD86",
+            "CCBD88", "PBD88", "SBLD89", "NMBUR93/94", "SBD89", "SBID83", "PBD84", "EBLD85", "KBLD89",
+            "BOKD86KA", "HBLD86", "NIFRAUR85/86", "EBLEB89", "GBILD84/85", "SCBD", "NMBD89/90",
+            "MLBLD89", "LBBLD89", "SBID89", "KBLD90", "CIZBD90", "NABILD87", "NIMBD90","GBBD85","HEIP","HIDCLP","KSBBLP","NIMBPO","RBCLPO","SGICP"
+        ]
 
-    def _init_db(self):
-        """Initialize SQLite database connection."""
-        try:
-            conn = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
-            conn.execute("PRAGMA journal_mode=WAL")  # Enable Write-Ahead Logging for better performance
-            conn.execute("PRAGMA synchronous=NORMAL")  # Balance between safety and speed
-            return conn
-        except Error as e:
-            logging.error(f"Database connection error: {e}")
-            raise
+    def _create_directories(self):
+        """Create directories for storing raw, processed, and historical data."""
+        directories = ['raw_data', 'processed_data', 'top_performers', 'historical_analysis']
+        for dir_name in directories:
+            os.makedirs(os.path.join(self.base_dir, dir_name), exist_ok=True)
 
-    def _create_tables(self):
-        """Create database tables if they don't exist."""
+    def scrape_stock_data(self):
+        """Scrape stock data from Sharesansar."""
         try:
-            cursor = self.conn.cursor()
+            url = "https://www.sharesansar.com/live-trading"
+            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+            response = requests.get(url, headers=headers, timeout=10)
+            response.raise_for_status()
+
+            soup = BeautifulSoup(response.text, "html.parser")
+            date_element = soup.find("span", {"id": "dDate"})
             
-            # Table for raw stock data
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS raw_stock_data (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    symbol TEXT NOT NULL,
-                    last_traded_price REAL,
-                    percent_change REAL,
-                    volume INTEGER,
-                    date TEXT NOT NULL,
-                    UNIQUE(symbol, date)  -- Prevent duplicate entries
-                )
-            ''')
+            if not date_element:
+                logging.error("Trading date not found")
+                return None, None
+
+            scraped_date = datetime.strptime(date_element.text.strip(), "%Y-%m-%d %H:%M:%S").date()
+            logging.info(f"Scraped Trading Date: {scraped_date}")
+
+            table = soup.find('table', class_='table')
+            if not table:
+                logging.error("No table found")
+                return None, None
+
+            headers = [th.text.strip() for th in table.find('thead').find_all('th')]
+            rows = [[td.text.strip() for td in row.find_all('td')] for row in table.find('tbody').find_all('tr')]
             
-            # Table for processed data
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS processed_data (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    symbol TEXT NOT NULL,
-                    performance_score REAL,
-                    normalized_change REAL,
-                    normalized_volume REAL,
-                    date TEXT NOT NULL,
-                    UNIQUE(symbol, date)  -- Prevent duplicate entries
-                )
-            ''')
+            df = pd.DataFrame(rows, columns=headers)
+            stock_col = [col for col in df.columns if 'symbol' in col.lower() or 'stock' in col.lower() or 'scrip' in col.lower()][0]
             
-            self.conn.commit()
-        except Error as e:
-            logging.error(f"Database table creation error: {e}")
-            raise
+            # Filter out excluded symbols
+            df_filtered = df[~df[stock_col].isin(self.excluded_symbols)].reset_index(drop=True)
+            
+            return df_filtered, scraped_date
 
-    def save_raw_data(self, df, date):
-        """Save raw stock data to the database."""
-        try:
-            df["date"] = date.strftime("%Y-%m-%d")  # Add date column
-            df = df.rename(columns={
-                "Stock Symbol": "symbol",
-                "Last Traded Price": "last_traded_price",
-                "% Change": "percent_change",
-                "Volume": "volume",
-            })
-            df[["symbol", "last_traded_price", "percent_change", "volume", "date"]].to_sql(
-                "raw_stock_data", self.conn, if_exists="append", index=False
-            )
-            self.conn.commit()
-            return True
         except Exception as e:
-            logging.error(f"Error saving raw data: {e}")
-            return False
+            logging.error(f"Scraping error: {e}")
+            return None, None
 
-    def save_processed_data(self, df, date):
-        """Save processed stock data to the database."""
+    def process_stock_data(self, df, change_threshold=4):
+        """Process stock data to identify top performers."""
         try:
-            df["date"] = date.strftime("%Y-%m-%d")  # Add date column
-            df[["symbol", "performance_score", "normalized_change", "normalized_volume", "date"]].to_sql(
-                "processed_data", self.conn, if_exists="append", index=False
-            )
-            self.conn.commit()
-            return True
-        except Exception as e:
-            logging.error(f"Error saving processed data: {e}")
-            return False
+            df.columns = df.columns.str.strip()
+            
+            # Identify the correct % change column
+            change_col = [col for col in df.columns if '% change' in col.lower()][0]
+            volume_col = [col for col in df.columns if 'volume' in col.lower()][0]
+            stock_col = [col for col in df.columns if 'symbol' in col.lower() or 'stock' in col.lower() or 'scrip' in col.lower()][0]
 
-    def load_data(self, table_name, date):
-        """Load data from the database for a specific date."""
-        try:
-            query = f"SELECT * FROM {table_name} WHERE date = ?"
-            df = pd.read_sql_query(query, self.conn, params=(date.strftime("%Y-%m-%d"),))
-            return df if not df.empty else None
+            # Clean and convert % change and volume columns
+            df[change_col] = pd.to_numeric(df[change_col].str.replace('%', ''), errors='coerce')
+            df[volume_col] = pd.to_numeric(df[volume_col].str.replace(',', ''), errors='coerce')
+
+            # Filter rows with % change > threshold
+            filtered_df = df[
+                (df[change_col] >= change_threshold) & 
+                (df[volume_col] > df[volume_col].median())
+            ].copy()
+
+            # Normalize data and calculate performance score
+            filtered_df['Normalized_Change'] = (filtered_df[change_col] - filtered_df[change_col].min()) / (filtered_df[change_col].max() - filtered_df[change_col].min())
+            filtered_df['Normalized_Volume'] = (filtered_df[volume_col] - filtered_df[volume_col].min()) / (filtered_df[volume_col].max() - filtered_df[volume_col].min())
+            filtered_df['Performance_Score'] = 0.6 * filtered_df['Normalized_Change'] + 0.4 * filtered_df['Normalized_Volume']
+
+            return filtered_df.sort_values('Performance_Score', ascending=False)
+
         except Exception as e:
-            logging.error(f"Error loading data from {table_name}: {e}")
+            logging.error(f"Data processing error: {e}")
+            return pd.DataFrame()
+
+    def save_stock_data(self, df, data_type='raw', selected_date=None):
+        """Save stock data to CSV files."""
+        if selected_date:
+            date_str = selected_date.strftime("%Y-%m-%d")
+        else:
+            date_str = datetime.now().strftime("%Y-%m-%d")
+
+        save_dir = os.path.join(self.base_dir, f'{data_type}_data', date_str)
+        os.makedirs(save_dir, exist_ok=True)
+        filename = os.path.join(save_dir, 'stock_data.csv' if data_type == 'raw' else 'top_performers.csv')
+        df.to_csv(filename, index=False)
+        return filename
+
+    def load_stock_data(self, data_type='raw', selected_date=None):
+        """Load stock data from CSV files."""
+        try:
+            if isinstance(selected_date, str):  # Convert string to datetime if needed
+                selected_date = datetime.strptime(selected_date, "%Y-%m-%d").date()
+                
+            if selected_date:
+                date_str = selected_date.strftime("%Y-%m-%d")
+            else:
+                date_str = datetime.now().strftime("%Y-%m-%d")
+
+            save_dir = os.path.join(self.base_dir, f'{data_type}_data', date_str)
+            filename = os.path.join(save_dir, 'stock_data.csv' if data_type == 'raw' else 'top_performers.csv')
+            
+            if os.path.exists(filename):
+                return pd.read_csv(filename)
+            else:
+                logging.warning(f"No data found for {data_type} on {date_str}")
+                return None
+        except Exception as e:
+            logging.error(f"Error loading data: {e}")
             return None
 
-    def get_available_dates(self):
-        """Get a list of all available dates in the database."""
-        try:
-            query = """
-                SELECT DISTINCT(date) FROM raw_stock_data
-                UNION
-                SELECT DISTINCT(date) FROM processed_data
-                ORDER BY date DESC
-            """
-            dates = pd.read_sql_query(query, self.conn)["date"].tolist()
-            return [datetime.strptime(d, "%Y-%m-%d").date() for d in dates]
-        except Exception as e:
-            logging.error(f"Error fetching available dates: {e}")
+    def get_available_dates(self, data_type='raw'):
+        """Get a list of available dates for which data is saved."""
+        data_dir = os.path.join(self.base_dir, f'{data_type}_data')
+        if not os.path.exists(data_dir):
             return []
-
-    def close(self):
-        """Close the database connection."""
-        self.conn.close()
-
-def scrape_stock_data():
-    """Scrape stock data from Sharesansar."""
-    try:
-        url = "https://www.sharesansar.com/live-trading"
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-        response = requests.get(url, headers=headers, timeout=10)
-        response.raise_for_status()
-
-        soup = BeautifulSoup(response.text, "html.parser")
-        date_element = soup.find("span", {"id": "dDate"})
         
-        if not date_element:
-            logging.error("Trading date not found")
-            return None, None
-
-        scraped_date = datetime.strptime(date_element.text.strip(), "%Y-%m-%d %H:%M:%S").date()
-        logging.info(f"Scraped Trading Date: {scraped_date}")
-
-        table = soup.find("table", class_="table")
-        if not table:
-            logging.error("No table found")
-            return None, None
-
-        headers = [th.text.strip() for th in table.find("thead").find_all("th")]
-        rows = [[td.text.strip() for td in row.find_all("td")] for row in table.find("tbody").find_all("tr")]
+        available_dates = []
+        for d in os.listdir(data_dir):
+            if os.path.isdir(os.path.join(data_dir, d)):
+                try:
+                    # Validate date format and add as datetime object
+                    datetime.strptime(d, "%Y-%m-%d")
+                    available_dates.append(d)
+                except ValueError:
+                    continue  # Skip invalid directories
         
-        df = pd.DataFrame(rows, columns=headers)
-        stock_col = [col for col in df.columns if "symbol" in col.lower() or "stock" in col.lower() or "scrip" in col.lower()][0]
-        
-        # Filter out excluded symbols
-        df_filtered = df[~df[stock_col].isin(EXCLUDED_SYMBOLS)].reset_index(drop=True)
-        
-        return df_filtered, scraped_date
-
-    except Exception as e:
-        logging.error(f"Scraping error: {e}")
-        return None, None
-
+        return sorted(available_dates, reverse=True)
 def main():
     st.title("🚀 NEPSE Stock Performance Analyzer")
-    manager = StockDataManager()
 
-    # Sidebar for settings
-    st.sidebar.header("Settings")
-    available_dates = manager.get_available_dates()
-    selected_date = st.sidebar.date_input(
-        "Select Date",
-        value=available_dates[0] if available_dates else datetime.today() - timedelta(days=1),
-        max_value=datetime.today(),
-        format="YYYY-MM-DD",
-        disabled=not available_dates
-    )
+    st.sidebar.header("Stock Analysis Settings")
+    selected_date = st.sidebar.date_input("Select Date", value=datetime.today() - timedelta(days=1), max_value=datetime.today())
     change_threshold = st.sidebar.slider("Minimum Performance Threshold (%)", min_value=1.0, max_value=10.0, value=4.0, step=0.5)
 
-    # Main tabs
     tab1, tab2 = st.tabs(["Fetch & Analyze Data", "View Saved Data"])
+    manager = StockDataManager()
 
     with tab1:
         if st.button("🔄 Fetch & Analyze Stock Data"):
-            with st.spinner("Processing stock data..."):
-                df_filtered, scraped_date = scrape_stock_data()
+            with st.spinner('Processing stock data...'):
+                df_filtered, scraped_date = manager.scrape_stock_data()
                 
                 if df_filtered is not None:
                     st.subheader("📊 Complete Stock Data (Without Excluded Symbols)")
                     st.dataframe(df_filtered)
                     
                     # Save raw data
-                    if manager.save_raw_data(df_filtered, scraped_date):
-                        st.success("Raw data saved to database.")
+                    raw_filename = manager.save_stock_data(df_filtered, 'raw', scraped_date)
+                    st.success(f"Raw data saved to: {raw_filename}")
                     
                     # Process and save top performers
-                    top_performers = process_stock_data(df_filtered, change_threshold)
+                    top_performers = manager.process_stock_data(df_filtered, change_threshold)
                     if not top_performers.empty:
-                        if manager.save_processed_data(top_performers, scraped_date):
-                            st.success("Processed data saved to database.")
+                        processed_filename = manager.save_stock_data(top_performers, 'processed', scraped_date)
+                        st.success(f"Processed data saved to: {processed_filename}")
                         
                         st.subheader("🏆 Top Stock Performers")
                         st.dataframe(top_performers)
                         
                         st.subheader("📈 Top Performers Visualization")
-                        stock_col = [col for col in top_performers.columns if "symbol" in col.lower() or "stock" in col.lower() or "scrip" in col.lower()][0]
-                        fig = px.bar(top_performers.head(10), x=stock_col, y="performance_score", title="Top Performers by Performance Score")
+                        stock_col = [col for col in top_performers.columns if 'symbol' in col.lower() or 'stock' in col.lower() or 'scrip' in col.lower()][0]
+                        fig = px.bar(top_performers.head(10), x=stock_col, y='Performance_Score', title="Top Performers by Performance Score")
                         st.plotly_chart(fig)
                     else:
                         st.warning(f"No stocks found above {change_threshold}% threshold")
@@ -230,20 +207,105 @@ def main():
 
     with tab2:
         st.subheader("📂 View Saved Data")
-        data_type = st.radio("Select Data Type", ["raw", "processed"])
+        data_type = st.radio("Select Data Type", ['raw', 'processed'])
 
-        if available_dates:
-            df = manager.load_data("raw_stock_data" if data_type == "raw" else "processed_data", selected_date)
-            if df is not None:
-                st.subheader(f"📊 {data_type.capitalize()} Data")
-                st.dataframe(df)
-            else:
-                st.warning(f"No {data_type} data found for {selected_date}.")
+        # Get available dates for the selected data type
+        available_dates = manager.get_available_dates(data_type)
+        if not available_dates:
+            st.warning(f"No {data_type} data found.")
         else:
-            st.warning("No data available in the database.")
+            # Add a date selector
+            selected_date_str = st.selectbox(f"Select a date for {data_type} data", available_dates)
+            
+            # Convert selected date string to datetime object
+            selected_date = datetime.strptime(selected_date_str, "%Y-%m-%d").date()
+            
+            # Load data for the selected date
+            df = manager.load_stock_data(data_type, selected_date)
+            if df is not None:
+                st.subheader(f"📊 {data_type.capitalize()} Data for {selected_date_str}")
+                st.dataframe(df)
+                # ... [rest of your code] ...
 
-    # Close database connection when done
-    manager.close()
+                if data_type == 'raw':
+                    # Enhanced analysis for historical raw data
+                    st.subheader("🔍 Detailed Historical Analysis")
+
+                    # Dynamically identify columns
+                    stock_col = [col for col in df.columns if 'symbol' in col.lower() or 'stock' in col.lower() or 'scrip' in col.lower()][0]
+                    change_col = [col for col in df.columns if '% change' in col.lower()][0]
+                    volume_col = [col for col in df.columns if 'volume' in col.lower()][0]
+
+                    # Clean and convert columns
+                    df[change_col] = pd.to_numeric(df[change_col].astype(str).str.replace('%', ''), errors='coerce')
+                    df[volume_col] = pd.to_numeric(df[volume_col].astype(str).str.replace(',', ''), errors='coerce')
+
+                    # Analysis sections
+                    analysis_thresholds = [
+                        (4.0, -4.0, "4%"),
+                        (2.5, -2.5, "2.5%")
+                    ]
+
+                    for pos_th, neg_th, label in analysis_thresholds:
+                        # Positive change analysis
+                        high_change_df = df[df[change_col] >= pos_th]
+                        num_high = len(high_change_df)
+                        pct_high = (num_high / 244) * 100
+                        
+                        st.subheader(f"Stocks with > {label} Change")
+                        cols = st.columns(2)
+                        cols[0].metric(f"Stocks > {label}", num_high)
+                        cols[1].metric(f"Percentage > {label}", f"{pct_high:.2f}%")
+                        st.dataframe(
+                            high_change_df[[stock_col, change_col, volume_col]]
+                            .sort_values(change_col, ascending=False)
+                            .style.format({change_col: "{:.2f}%", volume_col: "{:,}"})
+                        )
+
+                        # Negative change analysis
+                        low_change_df = df[df[change_col] <= -neg_th]
+                        num_low = len(low_change_df)
+                        pct_low = (num_low / 244) * 100
+                        
+                        st.subheader(f"Stocks with < -{label} Change")
+                        cols = st.columns(2)
+                        cols[0].metric(f"Stocks < -{label}", num_low)
+                        cols[1].metric(f"Percentage < -{label}", f"{pct_low:.2f}%")
+                        st.dataframe(
+                            low_change_df[[stock_col, change_col, volume_col]]
+                            .sort_values(change_col, ascending=True)
+                            .style.format({change_col: "{:.2f}%", volume_col: "{:,}"})
+                        )
+
+                    # Performance score calculation
+                    filtered_df = df[
+                        (df[change_col] >= 4) & 
+                        (df[volume_col] > df[volume_col].median())
+                    ].copy()
+                    if not filtered_df.empty:
+                        filtered_df['Normalized_Change'] = (filtered_df[change_col] - filtered_df[change_col].min()) / (filtered_df[change_col].max() - filtered_df[change_col].min())
+                        filtered_df['Normalized_Volume'] = (filtered_df[volume_col] - filtered_df[volume_col].min()) / (filtered_df[volume_col].max() - filtered_df[volume_col].min())
+                        filtered_df['Performance_Score'] = 0.6 * filtered_df['Normalized_Change'] + 0.4 * filtered_df['Normalized_Volume']
+
+                        st.subheader("🏆 Historical Top Performers")
+                        top_performers = filtered_df.sort_values('Performance_Score', ascending=False).head(10)
+                        st.dataframe(top_performers)
+
+                elif data_type == 'processed':
+                    st.subheader("🏆 Top Performers")
+                    top_performers = df.head(10)
+                    st.dataframe(top_performers)
+
+                    st.subheader("📈 Performance Distribution")
+                    fig = px.histogram(df, x='Performance_Score', nbins=20, title="Performance Score Distribution")
+                    st.plotly_chart(fig)
+
+    if st.sidebar.checkbox("Show Detailed Logs"):
+        try:
+            with open('stock_tracker.log', 'r') as log_file:
+                st.text(log_file.read())
+        except FileNotFoundError:
+            st.error("Log file not found")
 
 if __name__ == "__main__":
     main()
