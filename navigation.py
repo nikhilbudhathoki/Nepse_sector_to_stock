@@ -1,154 +1,128 @@
 import streamlit as st
+from main3 import main as sentiment_analysis
+from main2 import main as sector_value_analysis
+from main import main as calculator
+from app import main as web_scrapping_app
+from sma import main as sma_analysis
 
-# Placeholder functions for missing modules
-def dummy_main():
-    st.write("Function not implemented")
-
-# Import main modules with fallback to dummy functions
-try:
-    from main2 import main as sector_value_analysis
-except ImportError:
-    sector_value_analysis = dummy_main
-
-try:
-    from main import main as calculator
-except ImportError:
-    calculator = dummy_main
-
-try:
-    from app import main as web_scrapping_app
-except ImportError:
-    web_scrapping_app = dummy_main
-
-try:
-    from pos import main as pos_analysis
-except ImportError:
-    pos_analysis = dummy_main
-
-
-def init_navigation_state():
-    """Initialize all navigation-related session state variables"""
-    if "slide" not in st.session_state:
-        st.session_state.slide = 0
-    if "raw_data" not in st.session_state:
-        st.session_state.raw_data = None
-
+# Set page config FIRST and ONLY ONCE
 
 def dashboard():
-    """Render the main dashboard page"""
-    st.header("📌 SURAKSHYA INVESTMENTS \nFinancial Dashboard")
-    st.write("Welcome to the Financial Analysis Suite of Surakdhya Investments! Use the navigation bar to explore different features.")
+    col1, col2 = st.columns([1, 3])
+    with col1:
+        st.image("surakshya.png", use_column_width=True)
+    with col2:
+        st.header("📌 SURAKSHYA INVESTMENTS")
+        st.markdown("""
+            **Financial Dashboard**  
+            Welcome to the Financial Analysis Suite of Surakdhya Investments!  
+            Use the navigation bar to explore different features.
+        """)
 
+# Atomic CSS Reset for Streamlit
+st.markdown("""
+    <style>
+    /* Full-width reset */
+    .stApp > div,
+    .stApp > div > div,
+    .main .block-container {
+        padding: 0 !important;
+        margin: 0 !important;
+        max-width: 100% !important;
+    }
+    
+    /* Navigation bar container */
+    .nav-container {
+        padding: 1rem 2rem;
+        background: #f8f9fa;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    
+    /* Navigation buttons */
+    .stButton > button {
+        width: 100% !important;
+        padding: 0.75rem !important;
+        border-radius: 8px !important;
+        transition: all 0.3s !important;
+    }
+    
+    /* Active navigation button */
+    .stButton > button[aria-pressed='true'] {
+        background: #4CAF50 !important;
+        color: white !important;
+    }
+    
+    /* Full-width components */
+    .stPlotlyChart,
+    .stDataFrame,
+    .stDataEditor,
+    .stImage {
+        width: 100% !important;
+        padding: 0 !important;
+        margin: 0 !important;
+    }
+    
+    /* Column spacing */
+    .stHorizontalBlock {
+        gap: 1rem;
+    }
+    
+    /* Remove default markdown padding */
+    .stMarkdown {
+        padding: 0 !important;
+    }
+    </style>
+""", unsafe_allow_html=True)
 
 # Navigation configuration
 NAV_ITEMS = {
-    0: {"title": "📌 Dashboard", "icon": "🏠"},
-    1: {"title": "🏦 Sector Analysis", "icon": "📊"},
-    2: {"title": "🌐 Calculator", "icon": "🧮"},
-    3: {"title": "🔍 Web Scraping App", "icon": "🌍"},
-    4: {"title": "📊 POS Analysis", "icon": "📈"}  # Adjusted indexes
+    0: {"title": "Dashboard", "icon": "🏠"},
+    1: {"title": "Sentiment", "icon": "💬"},
+    2: {"title": "Sectors", "icon": "📊"},
+    3: {"title": "Calculator", "icon": "🧮"},
+    4: {"title": "Web Data", "icon": "🌐"},
+    5: {"title": "SMA", "icon": "📉"}
 }
 
+# Session state initialization
+if "current_page" not in st.session_state:
+    st.session_state.current_page = 0
 
-def render_navigation():
-    """Render the navigation bar"""
-    cols = st.columns([1, 3, 1])
-    with cols[1]:
-        st.title("Financial Analysis Suite")
-    
-    nav_cols = st.columns(len(NAV_ITEMS))
+# Navigation renderer
+def render_nav():
+    cols = st.columns(len(NAV_ITEMS) + 2)
     for idx, (key, item) in enumerate(NAV_ITEMS.items()):
-        with nav_cols[idx]:
+        with cols[idx]:
             if st.button(
                 f"{item['icon']} {item['title']}",
                 key=f"nav_{key}",
+                help=item['title'],
                 use_container_width=True
             ):
-                st.session_state.slide = key
+                st.session_state.current_page = key
 
+# Main content renderer
+def render_page():
+    pages = [
+        dashboard,
+        lambda: sentiment_analysis(),
+        lambda: sector_value_analysis(),
+        lambda: calculator(),
+        lambda: web_scrapping_app(),
+        lambda: sma_analysis()
+    ]
+    
+    container = st.container()
+    with container:
+        pages[st.session_state.current_page]()
+        st.markdown("---")
 
-def render_content():
-    """Render the main content based on selected navigation item"""
-    try:
-        if st.session_state.slide == 0:
-            dashboard()
-        elif st.session_state.slide == 1:
-            st.header("Sector Valuation Metrics")
-            sector_value_analysis()
-        elif st.session_state.slide == 2:
-            st.header("Web Data Acquisition")
-            calculator()
-        elif st.session_state.slide == 3:
-            st.header("Web Scraping Application")
-            web_scrapping_app()
-        elif st.session_state.slide == 4:
-            st.header("POS Analysis")
-            pos_analysis()
-    except Exception as e:
-        st.error(f"Error loading content: {str(e)}")
-        st.error("Please try refreshing the page or contact support if the issue persists.")
-
-
-def render_footer():
-    """Render the navigation footer"""
-    col1, col2, col3 = st.columns([2, 6, 2])
-    with col1:
-        if st.session_state.slide > 0:
-            if st.button("◀ Previous Section"):
-                st.session_state.slide -= 1
-    with col3:
-        if st.session_state.slide < len(NAV_ITEMS) - 1:
-            if st.button("Next Section ▶"):
-                st.session_state.slide += 1
-
-
-def load_css():
-    """Load custom CSS styles"""
-    st.markdown("""
-        <style>
-        .nav-button {
-            padding: 0.75rem 1.5rem;
-            border-radius: 10px;
-            transition: all 0.3s;
-            margin: 0 0.5rem;
-        }
-        .nav-button:hover {
-            transform: scale(1.05);
-            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-        }
-        .active-nav {
-            background-color: #4CAF50;
-            color: white !important;
-        }
-        .stRadio > div {
-            flex-direction: row !important;
-        }
-        .st-emotion-cache-1v0mbdj {
-            margin: auto;
-        }
-        </style>
-    """, unsafe_allow_html=True)
-
-
+# App entry point
 def main():
-    """Main function to run the application"""
-    try:
-        st.set_page_config(
-            page_title="Surakshya Investments",
-            page_icon="📊",
-            layout="wide"
-        )
-        init_navigation_state()
-        load_css()
-        render_navigation()
-        st.markdown("---")
-        render_content()
-        st.markdown("---")
-        render_footer()
-    except Exception as e:
-        st.error(f"An unexpected error occurred: {str(e)}")
-        st.error("Please try refreshing the page or contact support.")
-
+    st.markdown("<div class='nav-container'>", unsafe_allow_html=True)
+    render_nav()
+    st.markdown("</div>", unsafe_allow_html=True)
+    render_page()
 
 if __name__ == "__main__":
     main()
