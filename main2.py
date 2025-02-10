@@ -24,7 +24,6 @@ st.set_page_config(
 )
 
 # Enhanced CSS with much larger calendar and fixed zoom issues
-# Enhanced CSS with much larger calendar and fixed zoom issues
 st.markdown("""
     <style>
         /* General date input styling */
@@ -79,6 +78,7 @@ st.markdown("""
         }
     </style>
 """, unsafe_allow_html=True)
+
 @st.cache_data(ttl=0, show_spinner="Loading sector data...")
 def load_data(file_path):
     """Load and process data from CSV file with validation"""
@@ -153,6 +153,25 @@ def create_sector_chart(data, selected_date):
     fig.update_traces(textposition='outside')
     return fig
 
+def create_sector_time_series(data, selected_sector):
+    """Create time series chart for selected sector"""
+    if selected_sector not in data.columns:
+        return None
+    
+    fig = px.line(
+        data,
+        x=SECTOR_DATE_COL,
+        y=selected_sector,
+        title=f"{selected_sector} Weight Over Time",
+        labels={selected_sector: "Weight (%)", SECTOR_DATE_COL: "Date"}
+    )
+    fig.update_layout(
+        height=600,
+        title_x=0.5,
+        title_font_size=20
+    )
+    return fig
+
 def main():
     st.title("📊 NEPSE Sector Analysis")
     
@@ -183,6 +202,21 @@ def main():
                 st.plotly_chart(chart, use_container_width=True)
             else:
                 st.warning(f"⚠️ No data available for {view_date}")
+    
+    with col2:
+        st.subheader("📉 View Sector Over Time")
+        selected_sector = st.selectbox(
+            "Select Sector to View Over Time",
+            ALLOWED_SECTORS,
+            key="selected_sector"
+        )
+        
+        # Create and display time series chart
+        time_series_chart = create_sector_time_series(sector_data, selected_sector)
+        if time_series_chart:
+            st.plotly_chart(time_series_chart, use_container_width=True)
+        else:
+            st.warning(f"⚠️ No data available for {selected_sector}")
     
     # Data editor section
     st.markdown("---")
