@@ -1,11 +1,11 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import os
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 
 # Configuration
-SMA_FILE = "sma_data.csv"
 DATE_COL = 'DATE'
 SECTOR_COL = 'SECTOR'
 SMA_COLUMNS = ['10_SMA', '20_SMA', '50_SMA', '200_SMA']
@@ -52,56 +52,54 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
+# Initialize Google Sheets connection
+@st.cache_resource
+def init_gsheets():
+    """Initialize Google Sheets connection using Streamlit secrets."""
+    scope = [
+        'https://spreadsheets.google.com/feeds',
+        'https://www.googleapis.com/auth/drive'
+    ]
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(
+        st.secrets["google_credentials"], scope
+    )
+    client = gspread.authorize(creds)
+    return client.open("NEPSE_SMA_DATA").sheet1
+
+worksheet = init_gsheets()
+
+# Load data from Google Sheets
 @st.cache_data(ttl=0, show_spinner="Loading SMA data...")
-def load_sma_data(file_path):
-    """Load and process SMA data from CSV"""
-    if not os.path.exists(file_path):
-        df = pd.DataFrame(columns=[DATE_COL, SECTOR_COL] + SMA_COLUMNS)
-        df[DATE_COL] = pd.to_datetime(df[DATE_COL])
-        return df
-    
+def load_sma_data():
+    """Load data from Google Sheets."""
     try:
-        df = pd.read_csv(file_path)
-        required_columns = [DATE_COL, SECTOR_COL] + SMA_COLUMNS
+        records = worksheet.get_all_records()
+        if not records:
+            return pd.DataFrame(columns=[DATE_COL, SECTOR_COL] + SMA_COLUMNS)
         
-        # Validate columns
-        missing_cols = [col for col in required_columns if col not in df.columns]
-        if missing_cols:
-            st.error(f"Missing columns in SMA data: {', '.join(missing_cols)}")
-            return pd.DataFrame(columns=required_columns)
-        
+        df = pd.DataFrame(records)
         df[DATE_COL] = pd.to_datetime(df[DATE_COL], errors='coerce')
         return df.dropna(subset=[DATE_COL]).sort_values(DATE_COL)
     except Exception as e:
-        st.error(f"SMA data loading error: {str(e)}")
-        return pd.DataFrame(columns=required_columns)
+        st.error(f"Data loading error: {str(e)}")
+        return pd.DataFrame(columns=[DATE_COL, SECTOR_COL] + SMA_COLUMNS)
 
+# Save data to Google Sheets
 def save_sma_data(edited_df):
-    """Save SMA data with validation"""
+    """Save data to Google Sheets."""
     try:
-        # Check for required columns
-        required_columns = [DATE_COL, SECTOR_COL] + SMA_COLUMNS
-        missing_cols = [col for col in required_columns if col not in edited_df.columns]
-        if missing_cols:
-            st.error(f"Missing columns: {', '.join(missing_cols)}")
-            return False
-        
-        # Check for duplicates
-        if edited_df.duplicated(subset=[DATE_COL, SECTOR_COL]).any():
-            st.error("Duplicate entries found (same date and sector combination)")
-            return False
-        
-        # Save to temporary file first
-        temp_file = f"temp_sma_{datetime.now().timestamp()}.csv"
-        edited_df.to_csv(temp_file, index=False)
-        os.replace(temp_file, SMA_FILE)
+        # Clear existing data and update with new data
+        worksheet.clear()
+        worksheet.update([edited_df.columns.values.tolist()] + 
+                        edited_df.astype(str).values.tolist())
         return True
     except Exception as e:
         st.error(f"Save error: {str(e)}")
         return False
 
+# Create SMA time series chart
 def create_sma_chart(data, selected_sector):
-    """Create SMA time series chart for selected sector"""
+    """Create SMA time series chart for selected sector."""
     df_filtered = data[data[SECTOR_COL] == selected_sector]
     
     if df_filtered.empty:
@@ -124,8 +122,9 @@ def create_sma_chart(data, selected_sector):
     )
     return fig
 
+# Create SMA comparison charts for all sectors
 def create_comparison_charts(data):
-    """Create SMA comparison charts for all sectors"""
+    """Create SMA comparison charts for all sectors."""
     charts = []
     for sector in ALLOWED_SECTORS:
         sector_df = data[data[SECTOR_COL] == sector]
@@ -150,11 +149,12 @@ def create_comparison_charts(data):
             charts.append(None)
     return charts
 
+# Main app function
 def main():
     st.title("📈 NEPSE SMA Analysis")
     
     # Load data
-    sma_data = load_sma_data(SMA_FILE)
+    sma_data = load_sma_data()
     
     # Sector selection
     selected_sector = st.selectbox(
