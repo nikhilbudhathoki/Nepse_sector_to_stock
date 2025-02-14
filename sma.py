@@ -1,21 +1,22 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
+import sqlite3
 from datetime import datetime
+from sqlite3 import Error
 
 # Configuration
 DATE_COL = 'DATE'
 SECTOR_COL = 'SECTOR'
 SMA_COLUMNS = ['10_SMA', '20_SMA', '50_SMA', '200_SMA']
-
-# Define allowed sectors
 ALLOWED_SECTORS = [
     "Hydropower", "C. Bank", "D. Bank", "Finance", "Hotels",
     "Microfinance", "Investments", "Life insurance", "Non-life insurance",
     "Others", "Manufacture", "Tradings"
 ]
+
+# Database setup
+DB_NAME = "sma_data.db"
 
 # Set page config
 st.set_page_config(
@@ -52,50 +53,61 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Initialize Google Sheets connection
+# Database connection
 @st.cache_resource
-def init_gsheets():
-    """Initialize Google Sheets connection using Streamlit secrets."""
-    scope = [
-        'https://spreadsheets.google.com/feeds',
-        'https://www.googleapis.com/auth/drive'
-    ]
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(
-        st.secrets["google_credentials"], scope
-    )
-    client = gspread.authorize(creds)
-    return client.open("NEPSE_SMA_DATA").sheet1
+def create_connection():
+    """Create SQLite database connection and initialize tables."""
+    conn = None
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        # Create table if not exists
+        conn.execute(f"""CREATE TABLE IF NOT EXISTS sma_data (
+                        {DATE_COL} DATE,
+                        {SECTOR_COL} TEXT,
+                        {SMA_COLUMNS[0]} REAL,
+                        {SMA_COLUMNS[1]} REAL,
+                        {SMA_COLUMNS[2]} REAL,
+                        {SMA_COLUMNS[3]} REAL,
+                        PRIMARY KEY ({DATE_COL}, {SECTOR_COL})
+                     )""")
+        return conn
+    except Error as e:
+        st.error(f"Database error: {str(e)}")
+        return None
 
-worksheet = init_gsheets()
-
-# Load data from Google Sheets
+# Load data from SQLite
 @st.cache_data(ttl=0, show_spinner="Loading SMA data...")
 def load_sma_data():
-    """Load data from Google Sheets."""
+    """Load data from SQLite database."""
+    conn = create_connection()
     try:
-        records = worksheet.get_all_records()
-        if not records:
-            return pd.DataFrame(columns=[DATE_COL, SECTOR_COL] + SMA_COLUMNS)
-        
-        df = pd.DataFrame(records)
-        df[DATE_COL] = pd.to_datetime(df[DATE_COL], errors='coerce')
-        return df.dropna(subset=[DATE_COL]).sort_values(DATE_COL)
+        df = pd.read_sql("SELECT * FROM sma_data", conn, parse_dates=[DATE_COL])
+        return df.sort_values(DATE_COL)
     except Exception as e:
         st.error(f"Data loading error: {str(e)}")
         return pd.DataFrame(columns=[DATE_COL, SECTOR_COL] + SMA_COLUMNS)
+    finally:
+        if conn: conn.close()
 
-# Save data to Google Sheets
+# Save data to SQLite
 def save_sma_data(edited_df):
-    """Save data to Google Sheets."""
+    """Save data to SQLite database with transaction."""
+    conn = create_connection()
     try:
-        # Clear existing data and update with new data
-        worksheet.clear()
-        worksheet.update([edited_df.columns.values.tolist()] + 
-                        edited_df.astype(str).values.tolist())
+        # Delete existing sector data
+        sector = edited_df[SECTOR_COL].iloc[0]
+        conn.execute(f"DELETE FROM sma_data WHERE {SECTOR_COL} = ?", (sector,))
+        
+        # Insert new data
+        edited_df.to_sql('sma_data', conn, if_exists='append', index=False)
+        conn.commit()
         return True
     except Exception as e:
+        conn.rollback()
         st.error(f"Save error: {str(e)}")
         return False
+    finally:
+        if conn: conn.close()
 
 # Create SMA time series chart
 def create_sma_chart(data, selected_sector):
@@ -216,7 +228,7 @@ def main():
                 other_sectors_data = sma_data[sma_data[SECTOR_COL] != selected_sector]
                 updated_data = pd.concat([other_sectors_data, edited_sector_data], ignore_index=True)
                 
-                if save_sma_data(updated_data):
+                if save_sma_data(edited_sector_data):  # Only save the edited sector
                     st.success("SMA data saved successfully!")
                     st.cache_data.clear()
                     st.rerun()
