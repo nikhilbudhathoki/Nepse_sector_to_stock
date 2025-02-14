@@ -93,6 +93,10 @@ def load_sma_data():
 def save_sma_data(edited_df):
     """Save data to SQLite database with transaction."""
     conn = create_connection()
+    if conn is None:
+        st.error("Failed to connect to the database.")
+        return False
+
     try:
         # Delete existing sector data
         sector = edited_df[SECTOR_COL].iloc[0]
@@ -101,13 +105,16 @@ def save_sma_data(edited_df):
         # Insert new data
         edited_df.to_sql('sma_data', conn, if_exists='append', index=False)
         conn.commit()
+        st.success("Data saved successfully!")
         return True
     except Exception as e:
-        conn.rollback()
+        if conn:
+            conn.rollback()
         st.error(f"Save error: {str(e)}")
         return False
     finally:
-        if conn: conn.close()
+        if conn:
+            conn.close()
 
 # Create SMA time series chart
 def create_sma_chart(data, selected_sector):
