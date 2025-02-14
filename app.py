@@ -4,6 +4,8 @@ from bs4 import BeautifulSoup
 import pandas as pd
 import os
 import logging
+import json
+import shutil
 from datetime import datetime, timedelta
 import plotly.express as px
 
@@ -19,6 +21,8 @@ class StockDataManager:
     def __init__(self, base_dir='stock_data'):
         self.base_dir = base_dir
         self._create_directories()
+        self.metadata_file = os.path.join(self.base_dir, 'metadata.json')
+        self._init_metadata()
         self.excluded_symbols = [
             "SEF", "NICGF", "CMF1", "NBF2", "SIGS2", "CMF2", "NICBF", "NMB50", "SFMF", "LUK", "SLCF", 
             "KEF", "SBCF", "PSF", "NIBSF2", "NICSF", "RMF1", "MMF1", "NBF3", "NICFC", "KDBY", "GIBF1",
@@ -33,14 +37,36 @@ class StockDataManager:
             "GBILD86/87", "JBBD87", "NBLD85", "ADBLB86", "ADBLB87", "GBBBD85", "CBLD88", "EBLD86",
             "CCBD88", "PBD88", "SBLD89", "NMBUR93/94", "SBD89", "SBID83", "PBD84", "EBLD85", "KBLD89",
             "BOKD86KA", "HBLD86", "NIFRAUR85/86", "EBLEB89", "GBILD84/85", "SCBD", "NMBD89/90",
-            "MLBLD89", "LBBLD89", "SBID89", "KBLD90", "CIZBD90", "NABILD87", "NIMBD90","GBBD85","HEIP","HIDCLP","KSBBLP","NIMBPO","RBCLPO","SGICP"
+            "MLBLD89", "LBBLD89", "SBID89", "KBLD90", "CIZBD90", "NABILD87", "NIMBD90","GBBD85","HEIP",
+            "HIDCLP","KSBBLP","NIMBPO","RBCLPO","SGICP"
         ]
 
     def _create_directories(self):
         """Create directories for storing raw, processed, and historical data."""
-        directories = ['raw_data', 'processed_data', 'top_performers', 'historical_analysis']
+        directories = ['raw_data', 'processed_data', 'top_performers', 'historical_analysis', 'backups']
         for dir_name in directories:
             os.makedirs(os.path.join(self.base_dir, dir_name), exist_ok=True)
+
+    def _init_metadata(self):
+        """Initialize or load metadata tracking"""
+        if os.path.exists(self.metadata_file):
+            try:
+                with open(self.metadata_file, 'r') as f:
+                    self.metadata = json.load(f)
+            except Exception as e:
+                logging.error(f"Error loading metadata: {e}")
+                self.metadata = {'raw_data': {}, 'processed_data': {}}
+        else:
+            self.metadata = {'raw_data': {}, 'processed_data': {}}
+        self._save_metadata()
+
+    def _save_metadata(self):
+        """Save metadata to disk"""
+        try:
+            with open(self.metadata_file, 'w') as f:
+                json.dump(self.metadata, f, indent=4)
+        except Exception as e:
+            logging.error(f"Error saving metadata: {e}")
 
     def scrape_stock_data(self):
         """Scrape stock data from Sharesansar."""
@@ -112,22 +138,48 @@ class StockDataManager:
             return pd.DataFrame()
 
     def save_stock_data(self, df, data_type='raw', selected_date=None):
-        """Save stock data to CSV files."""
-        if selected_date:
-            date_str = selected_date.strftime("%Y-%m-%d")
-        else:
-            date_str = datetime.now().strftime("%Y-%m-%d")
+        """Save stock data with backup and metadata tracking."""
+        try:
+            if df is None or df.empty:
+                logging.warning(f"Attempted to save empty dataframe for {data_type}")
+                return None
 
-        save_dir = os.path.join(self.base_dir, f'{data_type}_data', date_str)
-        os.makedirs(save_dir, exist_ok=True)
-        filename = os.path.join(save_dir, 'stock_data.csv' if data_type == 'raw' else 'top_performers.csv')
-        df.to_csv(filename, index=False)
-        return filename
+            if selected_date:
+                date_str = selected_date.strftime("%Y-%m-%d")
+            else:
+                date_str = datetime.now().strftime("%Y-%m-%d")
+
+            # Save main data
+            save_dir = os.path.join(self.base_dir, f'{data_type}_data', date_str)
+            os.makedirs(save_dir, exist_ok=True)
+            filename = os.path.join(save_dir, f'stock_data.csv')
+            df.to_csv(filename, index=False)
+
+            # Create backup
+            backup_dir = os.path.join(self.base_dir, 'backups', f'{data_type}_data', date_str)
+            os.makedirs(backup_dir, exist_ok=True)
+            backup_filename = os.path.join(backup_dir, f'stock_data_{datetime.now().strftime("%H%M%S")}.csv')
+            shutil.copy2(filename, backup_filename)
+
+            # Update metadata
+            self.metadata[f'{data_type}_data'][date_str] = {
+                'filename': filename,
+                'backup': backup_filename,
+                'last_modified': datetime.now().isoformat(),
+                'row_count': len(df)
+            }
+            self._save_metadata()
+
+            return filename
+
+        except Exception as e:
+            logging.error(f"Error saving data: {e}")
+            return None
 
     def load_stock_data(self, data_type='raw', selected_date=None):
-        """Load stock data from CSV files."""
+        """Load stock data with validation and backup recovery."""
         try:
-            if isinstance(selected_date, str):  # Convert string to datetime if needed
+            if isinstance(selected_date, str):
                 selected_date = datetime.strptime(selected_date, "%Y-%m-%d").date()
                 
             if selected_date:
@@ -135,35 +187,74 @@ class StockDataManager:
             else:
                 date_str = datetime.now().strftime("%Y-%m-%d")
 
+            # Check metadata
+            if date_str in self.metadata[f'{data_type}_data']:
+                file_info = self.metadata[f'{data_type}_data'][date_str]
+                
+                # Try loading main file
+                if os.path.exists(file_info['filename']):
+                    df = pd.read_csv(file_info['filename'])
+                    if not df.empty:
+                        return df
+
+                # Try backup if main file fails
+                if os.path.exists(file_info['backup']):
+                    logging.info(f"Loading backup file for {date_str}")
+                    df = pd.read_csv(file_info['backup'])
+                    if not df.empty:
+                        # Restore main file from backup
+                        shutil.copy2(file_info['backup'], file_info['filename'])
+                        return df
+
+            # Traditional file loading as fallback
             save_dir = os.path.join(self.base_dir, f'{data_type}_data', date_str)
-            filename = os.path.join(save_dir, 'stock_data.csv' if data_type == 'raw' else 'top_performers.csv')
+            filename = os.path.join(save_dir, 'stock_data.csv')
             
             if os.path.exists(filename):
                 return pd.read_csv(filename)
             else:
                 logging.warning(f"No data found for {data_type} on {date_str}")
                 return None
+
         except Exception as e:
             logging.error(f"Error loading data: {e}")
             return None
 
     def get_available_dates(self, data_type='raw'):
-        """Get a list of available dates for which data is saved."""
-        data_dir = os.path.join(self.base_dir, f'{data_type}_data')
-        if not os.path.exists(data_dir):
+        """Get available dates with metadata validation."""
+        try:
+            data_dir = os.path.join(self.base_dir, f'{data_type}_data')
+            if not os.path.exists(data_dir):
+                return []
+            
+            available_dates = []
+            for d in os.listdir(data_dir):
+                if os.path.isdir(os.path.join(data_dir, d)):
+                    try:
+                        # Validate date format
+                        datetime.strptime(d, "%Y-%m-%d")
+                        # Check if data file exists
+                        if os.path.exists(os.path.join(data_dir, d, 'stock_data.csv')):
+                            available_dates.append(d)
+                    except ValueError:
+                        continue
+            
+            return sorted(available_dates, reverse=True)
+        except Exception as e:
+            logging.error(f"Error getting available dates: {e}")
             return []
-        
-        available_dates = []
-        for d in os.listdir(data_dir):
-            if os.path.isdir(os.path.join(data_dir, d)):
-                try:
-                    # Validate date format and add as datetime object
-                    datetime.strptime(d, "%Y-%m-%d")
-                    available_dates.append(d)
-                except ValueError:
-                    continue  # Skip invalid directories
-        
-        return sorted(available_dates, reverse=True)
+
+    def verify_data_integrity(self):
+        """Verify integrity of saved data"""
+        issues = []
+        for data_type in ['raw_data', 'processed_data']:
+            for date_str, info in self.metadata[data_type].items():
+                if not os.path.exists(info['filename']):
+                    issues.append(f"Missing main file for {data_type} on {date_str}")
+                if not os.path.exists(info['backup']):
+                    issues.append(f"Missing backup file for {data_type} on {date_str}")
+        return issues
+
 def main():
     st.title("🚀 NEPSE Stock Performance Analyzer")
 
@@ -171,8 +262,20 @@ def main():
     selected_date = st.sidebar.date_input("Select Date", value=datetime.today() - timedelta(days=1), max_value=datetime.today())
     change_threshold = st.sidebar.slider("Minimum Performance Threshold (%)", min_value=1.0, max_value=10.0, value=4.0, step=0.5)
 
-    tab1, tab2 = st.tabs(["Fetch & Analyze Data", "View Saved Data"])
+    # Initialize manager
     manager = StockDataManager()
+
+    # Add data integrity check in sidebar
+    if st.sidebar.button("Verify Data Integrity"):
+        issues = manager.verify_data_integrity()
+        if issues:
+            st.sidebar.error("Data integrity issues found:")
+            for issue in issues:
+                st.sidebar.warning(issue)
+        else:
+            st.sidebar.success("All data files verified successfully")
+
+    tab1, tab2 = st.tabs(["Fetch & Analyze Data", "View Saved Data"])
 
     with tab1:
         if st.button("🔄 Fetch & Analyze Stock Data"):
@@ -185,20 +288,22 @@ def main():
                     
                     # Save raw data
                     raw_filename = manager.save_stock_data(df_filtered, 'raw', scraped_date)
-                    st.success(f"Raw data saved to: {raw_filename}")
-                    
-                    # Process and save top performers
+                    if raw_filename:
+                        st.success(f"Raw data saved successfully")
+    # Process and save top performers
                     top_performers = manager.process_stock_data(df_filtered, change_threshold)
                     if not top_performers.empty:
                         processed_filename = manager.save_stock_data(top_performers, 'processed', scraped_date)
-                        st.success(f"Processed data saved to: {processed_filename}")
+                        if processed_filename:
+                            st.success(f"Processed data saved successfully")
                         
                         st.subheader("🏆 Top Stock Performers")
                         st.dataframe(top_performers)
                         
                         st.subheader("📈 Top Performers Visualization")
                         stock_col = [col for col in top_performers.columns if 'symbol' in col.lower() or 'stock' in col.lower() or 'scrip' in col.lower()][0]
-                        fig = px.bar(top_performers.head(10), x=stock_col, y='Performance_Score', title="Top Performers by Performance Score")
+                        fig = px.bar(top_performers.head(10), x=stock_col, y='Performance_Score', 
+                                   title="Top Performers by Performance Score")
                         st.plotly_chart(fig)
                     else:
                         st.warning(f"No stocks found above {change_threshold}% threshold")
@@ -217,15 +322,11 @@ def main():
             # Add a date selector
             selected_date_str = st.selectbox(f"Select a date for {data_type} data", available_dates)
             
-            # Convert selected date string to datetime object
-            selected_date = datetime.strptime(selected_date_str, "%Y-%m-%d").date()
-            
             # Load data for the selected date
-            df = manager.load_stock_data(data_type, selected_date)
+            df = manager.load_stock_data(data_type, selected_date_str)
             if df is not None:
                 st.subheader(f"📊 {data_type.capitalize()} Data for {selected_date_str}")
                 st.dataframe(df)
-                # ... [rest of your code] ...
 
                 if data_type == 'raw':
                     # Enhanced analysis for historical raw data
@@ -250,7 +351,7 @@ def main():
                         # Positive change analysis
                         high_change_df = df[df[change_col] >= pos_th]
                         num_high = len(high_change_df)
-                        pct_high = (num_high / 244) * 100
+                        pct_high = (num_high / len(df)) * 100
                         
                         st.subheader(f"Stocks with > {label} Change")
                         cols = st.columns(2)
@@ -263,9 +364,9 @@ def main():
                         )
 
                         # Negative change analysis
-                        low_change_df = df[df[change_col] <= -neg_th]
+                        low_change_df = df[df[change_col] <= neg_th]
                         num_low = len(low_change_df)
-                        pct_low = (num_low / 244) * 100
+                        pct_low = (num_low / len(df)) * 100
                         
                         st.subheader(f"Stocks with < -{label} Change")
                         cols = st.columns(2)
@@ -297,7 +398,8 @@ def main():
                     st.dataframe(top_performers)
 
                     st.subheader("📈 Performance Distribution")
-                    fig = px.histogram(df, x='Performance_Score', nbins=20, title="Performance Score Distribution")
+                    fig = px.histogram(df, x='Performance_Score', nbins=20, 
+                                     title="Performance Score Distribution")
                     st.plotly_chart(fig)
 
     if st.sidebar.checkbox("Show Detailed Logs"):
