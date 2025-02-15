@@ -16,10 +16,87 @@ logging.basicConfig(
     filemode='a'
 )
 
+class DatabaseManager:
+    def __init__(self, db_path="stock_data.db"):
+        self.db_path = db_path
+        self.conn = None
+        self.cursor = None
+        self.connect()
+        self.create_tables()
+    
+    def connect(self):
+        try:
+            self.conn = sqlite3.connect(self.db_path)
+            self.cursor = self.conn.cursor()
+        except sqlite3.Error as e:
+            logging.error(f"Database connection error: {e}")
+    
+    def create_tables(self):
+        try:
+            # Create raw data table
+            self.cursor.execute('''
+                CREATE TABLE IF NOT EXISTS raw_stock_data (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    date TEXT,
+                    data TEXT,
+                    UNIQUE(date)
+                )
+            ''')
+            
+            # Create processed data table
+            self.cursor.execute('''
+                CREATE TABLE IF NOT EXISTS processed_stock_data (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    date TEXT,
+                    data TEXT,
+                    UNIQUE(date)
+                )
+            ''')
+            self.conn.commit()
+        except sqlite3.Error as e:
+            logging.error(f"Error creating tables: {e}")
+    
+    def save_data(self, df, date, data_type):
+        try:
+            table_name = f"{data_type}_stock_data"
+            data_json = df.to_json()
+            
+            # Using REPLACE to handle updates for existing dates
+            self.cursor.execute(f'''
+                INSERT OR REPLACE INTO {table_name} (date, data)
+                VALUES (?, ?)
+            ''', (date, data_json))
+            self.conn.commit()
+        except sqlite3.Error as e:
+            logging.error(f"Error saving data: {e}")
+    
+    def load_data(self, date, data_type):
+        try:
+            table_name = f"{data_type}_stock_data"
+            self.cursor.execute(f"SELECT data FROM {table_name} WHERE date = ?", (date,))
+            result = self.cursor.fetchone()
+            if result:
+                return pd.read_json(result[0])
+            return None
+        except sqlite3.Error as e:
+            logging.error(f"Error loading data: {e}")
+            return None
+    
+    def get_available_dates(self, data_type):
+        try:
+            table_name = f"{data_type}_stock_data"
+            self.cursor.execute(f"SELECT date FROM {table_name} ORDER BY date DESC")
+            dates = [row[0] for row in self.cursor.fetchall()]
+            return dates
+        except sqlite3.Error as e:
+            logging.error(f"Error getting dates: {e}")
+            return []
+
 class StockDataManager:
     def __init__(self, base_dir='stock_data'):
         self.base_dir = base_dir
         self._create_directories()
+        self.db_manager = DatabaseManager()
         self.excluded_symbols = [
             "SEF", "NICGF", "CMF1", "NBF2", "SIGS2", "CMF2", "NICBF", "NMB50", "SFMF", "LUK", "SLCF", 
             "KEF", "SBCF", "PSF", "NIBSF2", "NICSF", "RMF1", "MMF1", "NBF3", "NICFC", "KDBY", "GIBF1",
@@ -36,36 +113,12 @@ class StockDataManager:
             "BOKD86KA", "HBLD86", "NIFRAUR85/86", "EBLEB89", "GBILD84/85", "SCBD", "NMBD89/90",
             "MLBLD89", "LBBLD89", "SBID89", "KBLD90", "CIZBD90", "NABILD87", "NIMBD90","GBBD85","HEIP","HIDCLP","KSBBLP","NIMBPO","RBCLPO","SGICP"
         ]
-        self.db_path = os.path.join(self.base_dir, 'stock_data.db')
-        self._initialize_db()
 
     def _create_directories(self):
         """Create directories for storing raw, processed, and historical data."""
         directories = ['raw_data', 'processed_data', 'top_performers', 'historical_analysis']
         for dir_name in directories:
             os.makedirs(os.path.join(self.base_dir, dir_name), exist_ok=True)
-
-    def _initialize_db(self):
-        """Initialize the SQLite database and create tables if they don't exist."""
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS raw_data (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    date TEXT NOT NULL,
-                    symbol TEXT NOT NULL,
-                    data TEXT NOT NULL
-                )
-            ''')
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS processed_data (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    date TEXT NOT NULL,
-                    symbol TEXT NOT NULL,
-                    performance_score REAL NOT NULL
-                )
-            ''')
-            conn.commit()
 
     def scrape_stock_data(self):
         """Scrape stock data from Sharesansar."""
@@ -137,76 +190,76 @@ class StockDataManager:
             return pd.DataFrame()
 
     def save_stock_data(self, df, data_type='raw', selected_date=None):
-        """Save stock data to SQLite database."""
+        """Save stock data to both CSV and SQLite."""
         if selected_date:
             date_str = selected_date.strftime("%Y-%m-%d")
         else:
             date_str = datetime.now().strftime("%Y-%m-%d")
 
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            if data_type == 'raw':
-                for _, row in df.iterrows():
-                    cursor.execute('''
-                        INSERT INTO raw_data (date, symbol, data)
-                        VALUES (?, ?, ?)
-                    ''', (date_str, row['Symbol'], row.to_json()))
-            elif data_type == 'processed':
-                for _, row in df.iterrows():
-                    cursor.execute('''
-                        INSERT INTO processed_data (date, symbol, performance_score)
-                        VALUES (?, ?, ?)
-                    ''', (date_str, row['Symbol'], row['Performance_Score']))
-            conn.commit()
+        # Save to CSV (keeping original functionality)
+        save_dir = os.path.join(self.base_dir, f'{data_type}_data', date_str)
+        os.makedirs(save_dir, exist_ok=True)
+        filename = os.path.join(save_dir, 'stock_data.csv' if data_type == 'raw' else 'top_performers.csv')
+        df.to_csv(filename, index=False)
+
+        # Save to SQLite
+        self.db_manager.save_data(df, date_str, data_type)
+        
+        return filename
 
     def load_stock_data(self, data_type='raw', selected_date=None):
         """Load stock data from SQLite database."""
         try:
-            if isinstance(selected_date, str):  # Convert string to datetime if needed
+            if isinstance(selected_date, str):
                 selected_date = datetime.strptime(selected_date, "%Y-%m-%d").date()
-            
+                
             if selected_date:
                 date_str = selected_date.strftime("%Y-%m-%d")
             else:
                 date_str = datetime.now().strftime("%Y-%m-%d")
 
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                if data_type == 'raw':
-                    cursor.execute('''
-                        SELECT data FROM raw_data WHERE date = ?
-                    ''', (date_str,))
-                    rows = cursor.fetchall()
-                    if rows:
-                        df = pd.concat([pd.read_json(row[0], typ='series').to_frame().T for row in rows], ignore_index=True)
-                        return df
-                elif data_type == 'processed':
-                    cursor.execute('''
-                        SELECT symbol, performance_score FROM processed_data WHERE date = ?
-                    ''', (date_str,))
-                    rows = cursor.fetchall()
-                    if rows:
-                        df = pd.DataFrame(rows, columns=['Symbol', 'Performance_Score'])
-                        return df
-            return None
+            # Try loading from SQLite first
+            df = self.db_manager.load_data(date_str, data_type)
+            if df is not None:
+                return df
+
+            # Fallback to CSV if SQLite data not found
+            save_dir = os.path.join(self.base_dir, f'{data_type}_data', date_str)
+            filename = os.path.join(save_dir, 'stock_data.csv' if data_type == 'raw' else 'top_performers.csv')
+            
+            if os.path.exists(filename):
+                df = pd.read_csv(filename)
+                # Save to SQLite for future use
+                self.db_manager.save_data(df, date_str, data_type)
+                return df
+            else:
+                logging.warning(f"No data found for {data_type} on {date_str}")
+                return None
+
         except Exception as e:
             logging.error(f"Error loading data: {e}")
             return None
 
     def get_available_dates(self, data_type='raw'):
-        """Get a list of available dates for which data is saved."""
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            if data_type == 'raw':
-                cursor.execute('''
-                    SELECT DISTINCT date FROM raw_data ORDER BY date DESC
-                ''')
-            elif data_type == 'processed':
-                cursor.execute('''
-                    SELECT DISTINCT date FROM processed_data ORDER BY date DESC
-                ''')
-            rows = cursor.fetchall()
-            return [row[0] for row in rows]
+        """Get available dates from both SQLite and filesystem."""
+        # Get dates from SQLite
+        db_dates = set(self.db_manager.get_available_dates(data_type))
+        
+        # Get dates from filesystem
+        data_dir = os.path.join(self.base_dir, f'{data_type}_data')
+        fs_dates = set()
+        if os.path.exists(data_dir):
+            for d in os.listdir(data_dir):
+                if os.path.isdir(os.path.join(data_dir, d)):
+                    try:
+                        datetime.strptime(d, "%Y-%m-%d")
+                        fs_dates.add(d)
+                    except ValueError:
+                        continue
+        
+        # Combine and sort dates
+        all_dates = sorted(db_dates.union(fs_dates), reverse=True)
+        return all_dates
 
 def main():
     st.title("🚀 NEPSE Stock Performance Analyzer")
@@ -228,18 +281,17 @@ def main():
                     st.dataframe(df_filtered)
                     
                     # Save raw data
-                    manager.save_stock_data(df_filtered, 'raw', scraped_date)
-                    st.success(f"Raw data saved to database.")
+                    raw_filename = manager.save_stock_data(df_filtered, 'raw', scraped_date)
+                    st.success(f"Raw data saved to: {raw_filename}")
                     
                     # Process and save top performers
                     top_performers = manager.process_stock_data(df_filtered, change_threshold)
                     if not top_performers.empty:
-                        manager.save_stock_data(top_performers, 'processed', scraped_date)
-                        st.success(f"Processed data saved to database.")
+                        processed_filename = manager.save_stock_data(top_performers, 'processed', scraped_date)
+                        st.success(f"Processed data saved to: {processed_filename}")
                         
                         st.subheader("🏆 Top Stock Performers")
                         st.dataframe(top_performers)
-                        
                         st.subheader("📈 Top Performers Visualization")
                         stock_col = [col for col in top_performers.columns if 'symbol' in col.lower() or 'stock' in col.lower() or 'scrip' in col.lower()][0]
                         fig = px.bar(top_performers.head(10), x=stock_col, y='Performance_Score', title="Top Performers by Performance Score")
@@ -261,11 +313,96 @@ def main():
             # Add a date selector
             selected_date_str = st.selectbox(f"Select a date for {data_type} data", available_dates)
             
+            # Convert selected date string to datetime object
+            selected_date = datetime.strptime(selected_date_str, "%Y-%m-%d").date()
+            
             # Load data for the selected date
-            df = manager.load_stock_data(data_type, selected_date_str)
+            df = manager.load_stock_data(data_type, selected_date)
             if df is not None:
                 st.subheader(f"📊 {data_type.capitalize()} Data for {selected_date_str}")
                 st.dataframe(df)
 
+                if data_type == 'raw':
+                    # Enhanced analysis for historical raw data
+                    st.subheader("🔍 Detailed Historical Analysis")
+
+                    # Dynamically identify columns
+                    stock_col = [col for col in df.columns if 'symbol' in col.lower() or 'stock' in col.lower() or 'scrip' in col.lower()][0]
+                    change_col = [col for col in df.columns if '% change' in col.lower()][0]
+                    volume_col = [col for col in df.columns if 'volume' in col.lower()][0]
+
+                    # Clean and convert columns
+                    df[change_col] = pd.to_numeric(df[change_col].astype(str).str.replace('%', ''), errors='coerce')
+                    df[volume_col] = pd.to_numeric(df[volume_col].astype(str).str.replace(',', ''), errors='coerce')
+
+                    # Analysis sections
+                    analysis_thresholds = [
+                        (4.0, -4.0, "4%"),
+                        (2.5, -2.5, "2.5%")
+                    ]
+
+                    for pos_th, neg_th, label in analysis_thresholds:
+                        # Positive change analysis
+                        high_change_df = df[df[change_col] >= pos_th]
+                        num_high = len(high_change_df)
+                        pct_high = (num_high / 244) * 100
+                        
+                        st.subheader(f"Stocks with > {label} Change")
+                        cols = st.columns(2)
+                        cols[0].metric(f"Stocks > {label}", num_high)
+                        cols[1].metric(f"Percentage > {label}", f"{pct_high:.2f}%")
+                        st.dataframe(
+                            high_change_df[[stock_col, change_col, volume_col]]
+                            .sort_values(change_col, ascending=False)
+                            .style.format({change_col: "{:.2f}%", volume_col: "{:,}"})
+                        )
+
+                        # Negative change analysis
+                        low_change_df = df[df[change_col] <= neg_th]
+                        num_low = len(low_change_df)
+                        pct_low = (num_low / 244) * 100
+                        
+                        st.subheader(f"Stocks with < -{label} Change")
+                        cols = st.columns(2)
+                        cols[0].metric(f"Stocks < -{label}", num_low)
+                        cols[1].metric(f"Percentage < -{label}", f"{pct_low:.2f}%")
+                        st.dataframe(
+                            low_change_df[[stock_col, change_col, volume_col]]
+                            .sort_values(change_col, ascending=True)
+                            .style.format({change_col: "{:.2f}%", volume_col: "{:,}"})
+                        )
+
+                    # Performance score calculation
+                    filtered_df = df[
+                        (df[change_col] >= 4) & 
+                        (df[volume_col] > df[volume_col].median())
+                    ].copy()
+                    if not filtered_df.empty:
+                        filtered_df['Normalized_Change'] = (filtered_df[change_col] - filtered_df[change_col].min()) / (filtered_df[change_col].max() - filtered_df[change_col].min())
+                        filtered_df['Normalized_Volume'] = (filtered_df[volume_col] - filtered_df[volume_col].min()) / (filtered_df[volume_col].max() - filtered_df[volume_col].min())
+                        filtered_df['Performance_Score'] = 0.6 * filtered_df['Normalized_Change'] + 0.4 * filtered_df['Normalized_Volume']
+
+                        st.subheader("🏆 Historical Top Performers")
+                        top_performers = filtered_df.sort_values('Performance_Score', ascending=False).head(10)
+                        st.dataframe(top_performers)
+
+                elif data_type == 'processed':
+                    st.subheader("🏆 Top Performers")
+                    top_performers = df.head(10)
+                    st.dataframe(top_performers)
+
+                    st.subheader("📈 Performance Distribution")
+                    fig = px.histogram(df, x='Performance_Score', nbins=20, title="Performance Score Distribution")
+                    st.plotly_chart(fig)
+
+    if st.sidebar.checkbox("Show Detailed Logs"):
+        try:
+            with open('stock_tracker.log', 'r') as log_file:
+                st.text(log_file.read())
+        except FileNotFoundError:
+            st.error("Log file not found")
+
 if __name__ == "__main__":
     main()
+
+
