@@ -196,6 +196,10 @@ def get_user_input():
 def update_data(selected_sector, input_data):
     """Update database with new sector data and auto-calculate NEPSE data."""
     try:
+        if "date" not in input_data:
+            st.error("Error: 'date' key is missing in the input data.")
+            return False
+        
         if save_sector_data(selected_sector, input_data):
             st.session_state.data[selected_sector] = load_sector_data(selected_sector)
             
@@ -242,10 +246,30 @@ def display_data_editor(selected_sector):
     )
     
     if not edited_df.equals(df):
-        edited_df["Label"] = edited_df["Positive %"].apply(get_label)
-        st.session_state.data[selected_sector] = edited_df
-        save_sector_data(selected_sector, edited_df.iloc[-1].to_dict())
-
+        # Ensure all required columns are present
+        required_columns = ["Date", "No of positive stock", "No of negative stock", 
+                            "No of total stock", "No of No change", "Positive %", "Label"]
+        if all(col in edited_df.columns for col in required_columns):
+            # Update labels
+            edited_df["Label"] = edited_df["Positive %"].apply(get_label)
+            
+            # Save each row to Supabase
+            for _, row in edited_df.iterrows():
+                data_dict = {
+                    "date": row["Date"],
+                    "positive_stock": row["No of positive stock"],
+                    "negative_stock": row["No of negative stock"],
+                    "no_change": row["No of No change"],
+                    "positive_percentage": row["Positive %"],
+                    "total_stock": row["No of total stock"]
+                }
+                save_sector_data(selected_sector, data_dict)
+            
+            # Update session state
+            st.session_state.data[selected_sector] = edited_df
+            st.success("Data updated successfully!")
+        else:
+            st.error("Error: Edited data is missing required columns. Please check your input.")
 
 def display_nepse_equity():
     """Display NEPSE data editor with automatic updates."""
