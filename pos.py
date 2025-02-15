@@ -65,17 +65,28 @@ def load_sector_data(sector):
         response = supabase.table('pos').select("*").eq("sector", sector).order("date", desc=True).execute()
         df = pd.DataFrame(response.data)
         
-        # Handle missing 'date' column
+        # Check if the 'date' column exists
         if 'date' not in df.columns:
-            st.error(f"Missing 'date' column in data for sector: {sector}")
+            st.error(f"Error: 'date' column not found in the 'pos' table for sector: {sector}")
+            return pd.DataFrame()
+        
+        # Check if the 'date' column is empty
+        if df['date'].isnull().all():
+            st.error(f"Error: 'date' column is empty in the 'pos' table for sector: {sector}")
+            return pd.DataFrame()
+        
+        # Convert 'date' column to datetime
+        try:
+            df["Date"] = pd.to_datetime(df["date"])
+        except Exception as e:
+            st.error(f"Error converting 'date' column to datetime: {e}")
             return pd.DataFrame()
         
         # Calculate total_stock dynamically
         if not df.empty:
             df["total_stock"] = df["positive_stock"] + df["negative_stock"] + df["no_change"]
         
-        # Convert datetime and rename columns
-        df["Date"] = pd.to_datetime(df["date"])
+        # Drop the original 'date' column and rename others
         df = df.drop(columns=["date"])
         df = df.rename(columns={
             "positive_stock": "No of positive stock",
