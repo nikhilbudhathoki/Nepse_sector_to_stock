@@ -25,7 +25,7 @@ def get_label(value):
 def save_sector_data(sector, data_dict):
     """Save sector data to Supabase database."""
     try:
-        response = supabase.table('sector_data').upsert({
+        response = supabase.table('pos').upsert({
             "sector": sector,
             "date": data_dict["date"].strftime("%Y-%m-%d"),
             "positive_stock": data_dict["positive_stock"],
@@ -63,7 +63,7 @@ def save_nepse_data(date, total_positive, total_stock=None):
 def load_sector_data(sector):
     """Load sector data from Supabase database."""
     try:
-        response = supabase.table('sector_data').select("*").eq("sector", sector).order("date", desc=True).execute()
+        response = supabase.table('pos').select("*").eq("sector", sector).order("date", desc=True).execute()
         df = pd.DataFrame(response.data)
         df["Date"] = pd.to_datetime(df["date"])
         df = df.drop(columns=["date"])
