@@ -1,395 +1,158 @@
-import streamlit as st
+import sqlite3
 import pandas as pd
-import plotly.express as px
-from datetime import datetime
+import streamlit as st
+from pathlib import Path
 import os
-import psycopg2
-from psycopg2.extras import execute_values
-from urllib.parse import urlparse
 
-# Configuration
-DATE_COL = 'DATE'
-SECTOR_COL = 'SECTOR'
-SMA_COLUMNS = ['10_SMA', '20_SMA', '50_SMA', '200_SMA']
-ALLOWED_SECTORS = [
-    "Hydropower", "C. Bank", "D. Bank", "Finance", "Hotels",
-    "Microfinance", "Investments", "Life insurance", "Non-life insurance",
-    "Others", "Manufacture", "Tradings"
-]
-
-# Database configuration
-DATABASE_URL = os.getenv('DATABASE_URL', 'postgresql://localhost:5432/your_local_db')
-
-# Parse database URL
-parsed_url = urlparse(DATABASE_URL)
-DB_CONFIG = {
-    'dbname': parsed_url.path[1:],
-    'user': parsed_url.username,
-    'password': parsed_url.password,
-    'host': parsed_url.hostname,
-    'port': parsed_url.port
-}
-
-# Set page config
-st.set_page_config(
-    page_title="NEPSE SMA Analysis",
-    page_icon="📈",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
-# Enhanced CSS for better UI
-st.markdown("""
-    <style>
-        .stDateInput, .stSelectbox {
-            margin-bottom: 20px;
-        }
-        .stDataEditor {
-            margin-bottom: 30px;
-        }
-        .stPlotlyChart {
-            margin-top: 20px;
-        }
-        h2 {
-            color: #2E86C1;
-            border-bottom: 2px solid #2E86C1;
-            padding-bottom: 10px;
-        }
-        .stAlert {
-            background-color: #f8f9fa;
-            border-radius: 4px;
-            padding: 1rem;
-            margin-bottom: 1rem;
-        }
-        .sector-label {
-            text-align: center;
-            font-weight: bold;
-            margin-top: 0.5rem;
-        }
-        .chart-container {
-            background-color: white;
-            border-radius: 8px;
-            padding: 1rem;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-    </style>
-""", unsafe_allow_html=True)
-
-# Health check endpoint
-@st.cache_data
-def health_check():
-    """Health check endpoint for monitoring."""
-    return {"status": "healthy", "timestamp": datetime.now().isoformat()}
-
-def init_db():
-    """Initialize database and create tables if they don't exist."""
-    conn = None
-    try:
-        conn = psycopg2.connect(**DB_CONFIG)
-        cur = conn.cursor()
+class DatabaseManager:
+    def __init__(self, db_path="data/app.db"):
+        """Initialize database connection and create tables if they don't exist."""
+        # Ensure the data directory exists
+        os.makedirs(os.path.dirname(db_path), exist_ok=True)
         
-        # Create table with proper PostgreSQL syntax
-        create_table_sql = f"""
-        CREATE TABLE IF NOT EXISTS sma_data (
-            {DATE_COL} DATE,
-            {SECTOR_COL} TEXT,
-            "10_SMA" DOUBLE PRECISION,
-            "20_SMA" DOUBLE PRECISION,
-            "50_SMA" DOUBLE PRECISION,
-            "200_SMA" DOUBLE PRECISION,
-            PRIMARY KEY ({DATE_COL}, {SECTOR_COL})
-        );
+        self.db_path = db_path
+        self.conn = None
+        self.cursor = None
         
-        -- Create index for better query performance
-        CREATE INDEX IF NOT EXISTS idx_sma_sector ON sma_data ({SECTOR_COL});
-        CREATE INDEX IF NOT EXISTS idx_sma_date ON sma_data ({DATE_COL});
-        """
-        cur.execute(create_table_sql)
-        conn.commit()
-        return True
-    except Exception as e:
-        st.error(f"Database initialization error: {str(e)}")
-        return False
-    finally:
-        if conn:
-            conn.close()
-
-@st.cache_resource
-def get_db_connection():
-    """Create and return a database connection."""
-    try:
-        conn = psycopg2.connect(**DB_CONFIG)
-        return conn
-    except Exception as e:
-        st.error(f"Database connection error: {str(e)}")
-        return None
-
-@st.cache_data(ttl=0, show_spinner="Loading SMA data...")
-def load_sma_data():
-    """Load data from PostgreSQL database."""
-    conn = get_db_connection()
-    if conn is None:
-        return pd.DataFrame(columns=[DATE_COL, SECTOR_COL] + SMA_COLUMNS)
-    
-    try:
-        query = f"""
-        SELECT {DATE_COL}, {SECTOR_COL}, "10_SMA", "20_SMA", "50_SMA", "200_SMA"
-        FROM sma_data
-        ORDER BY {DATE_COL}
-        """
-        df = pd.read_sql_query(query, conn)
-        df[DATE_COL] = pd.to_datetime(df[DATE_COL])
-        return df
-    except Exception as e:
-        st.error(f"Data loading error: {str(e)}")
-        return pd.DataFrame(columns=[DATE_COL, SECTOR_COL] + SMA_COLUMNS)
-    finally:
-        conn.close()
-
-def save_sma_data(edited_df):
-    """Save data to PostgreSQL database."""
-    if edited_df.empty:
-        st.warning("No data to save.")
-        return False
-    
-    conn = get_db_connection()
-    if conn is None:
-        return False
-
-    try:
-        cur = conn.cursor()
-        
-        # Delete existing sector data
-        sector = edited_df[SECTOR_COL].iloc[0]
-        cur.execute(f"DELETE FROM sma_data WHERE {SECTOR_COL} = %s", (sector,))
-        
-        # Prepare data for insertion
-        columns = [DATE_COL, SECTOR_COL] + SMA_COLUMNS
-        values = [tuple(row) for row in edited_df[columns].values]
-        
-        # Use execute_values for efficient bulk insert
-        insert_query = f"""
-        INSERT INTO sma_data ({', '.join(f'"{col}"' for col in columns)})
-        VALUES %s
-        """
-        execute_values(cur, insert_query, values)
-        
-        conn.commit()
-        st.success("Data saved successfully!")
-        return True
-    except Exception as e:
-        conn.rollback()
-        st.error(f"Save error: {str(e)}")
-        return False
-    finally:
-        conn.close()
-
-def create_sma_chart(data, selected_sector):
-    """Create SMA time series chart for selected sector."""
-    df_filtered = data[data[SECTOR_COL] == selected_sector]
-    
-    if df_filtered.empty:
-        return None
-    
-    fig = px.line(
-        df_filtered,
-        x=DATE_COL,
-        y=SMA_COLUMNS,
-        title=f"SMA Analysis for {selected_sector}",
-        labels={'value': 'SMA Value', DATE_COL: 'Date'},
-        markers=True
-    )
-    
-    fig.update_layout(
-        height=600,
-        title_x=0.5,
-        legend_title='SMA Periods',
-        hovermode='x unified',
-        xaxis_title="Date",
-        yaxis_title="SMA Value",
-        template="plotly_white",
-        showlegend=True,
-        legend=dict(
-            yanchor="top",
-            y=0.99,
-            xanchor="left",
-            x=0.01,
-            bgcolor="rgba(255, 255, 255, 0.8)"
-        )
-    )
-    
-    # Add range slider
-    fig.update_xaxes(rangeslider_visible=True)
-    
-    return fig
-
-def create_comparison_charts(data):
-    """Create SMA comparison charts for all sectors."""
-    charts = []
-    for sector in ALLOWED_SECTORS:
-        sector_df = data[data[SECTOR_COL] == sector]
-        if not sector_df.empty:
-            fig = px.line(
-                sector_df,
-                x=DATE_COL,
-                y=SMA_COLUMNS,
-                title=f"{sector} SMA Trends",
-                labels={'value': 'SMA Value', DATE_COL: 'Date'},
-                markers=True
+    def connect(self):
+        """Create a database connection."""
+        try:
+            self.conn = sqlite3.connect(self.db_path)
+            self.cursor = self.conn.cursor()
+            self.create_tables()
+            return True
+        except sqlite3.Error as e:
+            st.error(f"Database connection error: {e}")
+            return False
+            
+    def disconnect(self):
+        """Close the database connection."""
+        if self.conn:
+            self.conn.close()
+            
+    def create_tables(self):
+        """Create necessary tables if they don't exist."""
+        self.cursor.execute('''
+            CREATE TABLE IF NOT EXISTS user_data (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL,
+                email TEXT UNIQUE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
-            fig.update_layout(
-                height=300,
-                title_x=0.5,
-                legend_title='SMA Periods',
-                margin=dict(l=20, r=20, t=40, b=20),
-                showlegend=False,
-                template="plotly_white",
-                xaxis_title="Date",
-                yaxis_title="SMA Value"
+        ''')
+        
+        self.cursor.execute('''
+            CREATE TABLE IF NOT EXISTS entries (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                content TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES user_data (id)
             )
-            charts.append(fig)
-        else:
-            charts.append(None)
-    return charts
+        ''')
+        self.conn.commit()
+        
+    def add_user(self, username, email):
+        """Add a new user to the database."""
+        try:
+            self.cursor.execute(
+                "INSERT INTO user_data (username, email) VALUES (?, ?)",
+                (username, email)
+            )
+            self.conn.commit()
+            return True
+        except sqlite3.IntegrityError:
+            st.warning("Email already exists!")
+            return False
+        except sqlite3.Error as e:
+            st.error(f"Error adding user: {e}")
+            return False
+            
+    def add_entry(self, user_id, content):
+        """Add a new entry for a user."""
+        try:
+            self.cursor.execute(
+                "INSERT INTO entries (user_id, content) VALUES (?, ?)",
+                (user_id, content)
+            )
+            self.conn.commit()
+            return True
+        except sqlite3.Error as e:
+            st.error(f"Error adding entry: {e}")
+            return False
+            
+    def get_user_entries(self, user_id):
+        """Get all entries for a specific user."""
+        try:
+            query = """
+                SELECT e.id, e.content, e.created_at 
+                FROM entries e
+                WHERE e.user_id = ?
+                ORDER BY e.created_at DESC
+            """
+            df = pd.read_sql_query(query, self.conn, params=(user_id,))
+            return df
+        except sqlite3.Error as e:
+            st.error(f"Error retrieving entries: {e}")
+            return pd.DataFrame()
+            
+    def get_all_users(self):
+        """Get all users from the database."""
+        try:
+            query = "SELECT * FROM user_data ORDER BY created_at DESC"
+            df = pd.read_sql_query(query, self.conn)
+            return df
+        except sqlite3.Error as e:
+            st.error(f"Error retrieving users: {e}")
+            return pd.DataFrame()
 
-def calculate_statistics(data, sector):
-    """Calculate and return key statistics for a sector."""
-    if data.empty:
-        return None
-    
-    sector_data = data[data[SECTOR_COL] == sector]
-    if sector_data.empty:
-        return None
-    
-    latest_data = sector_data.iloc[-1]
-    
-    stats = {
-        "Latest Date": latest_data[DATE_COL].strftime("%Y-%m-%d"),
-        "10 Day SMA": f"{latest_data['10_SMA']:.2f}",
-        "20 Day SMA": f"{latest_data['20_SMA']:.2f}",
-        "50 Day SMA": f"{latest_data['50_SMA']:.2f}",
-        "200 Day SMA": f"{latest_data['200_SMA']:.2f}",
-    }
-    
-    return stats
-
+# Example Streamlit app implementation
 def main():
-    # Check for health check request
-    if st.query_params.get("health") == "check":
-        st.json(health_check())
-        st.stop()
-    
-    st.title("📈 NEPSE SMA Analysis")
+    st.title("Persistent Data Storage Demo")
     
     # Initialize database
-    if not init_db():
-        st.error("Failed to initialize database. Please check your database configuration.")
+    db = DatabaseManager()
+    if not db.connect():
+        st.error("Failed to connect to database")
         return
-    
-    # Load data
-    sma_data = load_sma_data()
-    
-    # Sector selection
-    selected_sector = st.selectbox(
-        "Choose Sector",
-        ALLOWED_SECTORS,
-        index=0,
-        key='sector_selector'
-    )
-    
-    # Main layout
-    col1, col2 = st.columns([1, 3])
-    
-    with col1:
-        st.subheader("SMA Chart")
-        chart = create_sma_chart(sma_data, selected_sector)
-        if chart:
-            st.plotly_chart(chart, use_container_width=True)
-            
-            # Display statistics
-            stats = calculate_statistics(sma_data, selected_sector)
-            if stats:
-                st.subheader("Latest Statistics")
-                for key, value in stats.items():
-                    st.metric(key, value)
-        else:
-            st.info(f"No SMA data available for {selected_sector}. Add data using the editor.")
-
-    with col2:
-        st.subheader("SMA Data Editor")
-        st.markdown(f"**Editing data for sector: {selected_sector}**")
         
-        # Filter data for the selected sector
-        sector_data = sma_data[sma_data[SECTOR_COL] == selected_sector].copy()
+    # Sidebar for user management
+    with st.sidebar:
+        st.header("Add New User")
+        username = st.text_input("Username")
+        email = st.text_input("Email")
+        if st.button("Add User"):
+            if username and email:
+                if db.add_user(username, email):
+                    st.success("User added successfully!")
+                    
+    # Main content area
+    users_df = db.get_all_users()
+    if not users_df.empty:
+        st.header("Users")
+        st.dataframe(users_df)
         
-        with st.expander("Edit SMA Values", expanded=True):
-            edited_sector_data = st.data_editor(
-                sector_data,
-                num_rows="dynamic",
-                column_config={
-                    DATE_COL: st.column_config.DateColumn(
-                        "Date",
-                        format="YYYY-MM-DD",
-                        required=True
-                    ),
-                    **{
-                        sma: st.column_config.NumberColumn(
-                            sma.replace('_', ' '),
-                            help=f"{sma.split('_')[0]} days simple moving average",
-                            min_value=0.0,
-                            format="%.2f",
-                            required=True
-                        ) for sma in SMA_COLUMNS
-                    }
-                },
-                height=600,
-                key='sma_editor'
-            )
+        # Add entry for selected user
+        selected_user = st.selectbox(
+            "Select User",
+            options=users_df['id'].tolist(),
+            format_func=lambda x: users_df[users_df['id'] == x]['username'].iloc[0]
+        )
+        
+        content = st.text_area("New Entry")
+        if st.button("Add Entry"):
+            if content:
+                if db.add_entry(selected_user, content):
+                    st.success("Entry added successfully!")
+                    
+        # Display user entries
+        entries_df = db.get_user_entries(selected_user)
+        if not entries_df.empty:
+            st.header("User Entries")
+            st.dataframe(entries_df)
             
-            if not edited_sector_data.empty:
-                edited_sector_data[SECTOR_COL] = selected_sector
-                
-                if st.button("💾 Save SMA Data", type="primary"):
-                    if save_sma_data(edited_sector_data):
-                        st.cache_data.clear()
-                        st.rerun()
-
-    # Comparison Section
-    st.markdown("---")
-    st.subheader("📊 Sector Comparison View")
-    
-    # Date range selector
-    min_date = sma_data[DATE_COL].min() if not sma_data.empty else datetime.today()
-    max_date = sma_data[DATE_COL].max() if not sma_data.empty else datetime.today()
-    
-    comparison_dates = st.date_input(
-        "Select Date Range for Comparison",
-        value=[min_date, max_date],
-        min_value=min_date,
-        max_value=max_date
-    )
-    
-    if len(comparison_dates) == 2:
-        start_date, end_date = comparison_dates
-        filtered_data = sma_data[
-            (sma_data[DATE_COL] >= pd.to_datetime(start_date)) &
-            (sma_data[DATE_COL] <= pd.to_datetime(end_date))
-        ]
-    else:
-        filtered_data = sma_data
-    
-    st.write("### SMA Trends Across All Sectors")
-    comparison_charts = create_comparison_charts(filtered_data)
-    
-    cols = st.columns(3)
-    for i, (sector, chart) in enumerate(zip(ALLOWED_SECTORS, comparison_charts)):
-        with cols[i % 3]:
-            if chart:
-                with st.container():
-                    st.plotly_chart(chart, use_container_width=True)
-                    st.markdown(f"<div class='sector-label'>{sector}</div>", unsafe_allow_html=True)
-            else:
-                st.info(f"No data available for {sector}")
+    # Close database connection
+    db.disconnect()
 
 if __name__ == "__main__":
     main()
