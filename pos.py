@@ -104,62 +104,72 @@ def get_user_input():
     positive_percentage = (positive_stock / total_stock * 100) if total_stock > 0 else 0
     
     return {
-        "date": date,
+        "date": date,  # Ensure this key is included
         "positive_stock": positive_stock,
         "negative_stock": negative_stock,
         "total_stock": total_stock,
         "no_change": no_change,
         "positive_percentage": positive_percentage
+    
     }
+def save_sector_data(sector, data_dict):
+    """Save sector data to Supabase database."""
+    try:
+        # Ensure the date is in the correct format
+        if "date" not in data_dict:
+            st.error("Error: 'date' key is missing in the input data.")
+            return False
+        
+        # Convert date to string format (YYYY-MM-DD)
+        date_str = data_dict["date"].strftime("%Y-%m-%d")
+        
+        # Save data to Supabase
+        response = supabase.table('pos').upsert({
+            "sector": sector,
+            "date": date_str,  # Use the formatted date string
+            "positive_stock": float(data_dict["positive_stock"]),
+            "negative_stock": float(data_dict["negative_stock"]),
+            "no_change": float(data_dict["no_change"]),
+            "positive_percentage": float(data_dict["positive_percentage"]),
+            "label": get_label(data_dict["positive_percentage"]),
+            "total_stock": float(data_dict["total_stock"])
+        }).execute()
+        return True
+    except Exception as e:
+        st.error(f"Error saving sector data: {e}")
+        return False
 
 def update_data(selected_sector, input_data):
-    """Update session state with new data and auto-calculate labels."""
+    """Update database with new sector data and auto-calculate NEPSE data."""
     try:
-        new_row = pd.DataFrame({
-            "Date": [pd.to_datetime(input_data["date"])],
-            "No of positive stock": [input_data["positive_stock"]],
-            "No of negative stock": [input_data["negative_stock"]],
-            "No of total stock": [input_data["total_stock"]],
-            "No of No change": [input_data["no_change"]],
-            "Positive %": [input_data["positive_percentage"]],
-            "Label": [get_label(input_data["positive_percentage"])]
-        })
-        
-        st.session_state.data[selected_sector] = pd.concat(
-            [st.session_state.data[selected_sector], new_row], 
-            ignore_index=True
-        ).drop_duplicates(subset=["Date"], keep="last")
-        
-        # Update NEPSE Equity data
-        date = input_data["date"]
-        all_sectors_have_data = all(
-            pd.to_datetime(date) in pd.to_datetime(df["Date"]).values 
-            for df in st.session_state.data.values()
-        )
-        
-        if all_sectors_have_data:
-            total_positive = sum(
-                df[pd.to_datetime(df["Date"]) == pd.to_datetime(date)]["No of positive stock"].iloc[0]
-                for df in st.session_state.data.values()
+        if save_sector_data(selected_sector, input_data):
+            st.session_state.data[selected_sector] = load_sector_data(selected_sector)
+            
+            date = input_data["date"]
+            all_sectors = list(st.session_state.data.keys())
+            
+            # Check if all sectors have data for this date
+            all_sectors_have_data = all(
+                any(pd.to_datetime(date) == pd.to_datetime(row["Date"]) 
+                for _, row in st.session_state.data[sector].iterrows())
+                for sector in all_sectors
             )
             
-            # Create/Update NEPSE row
-            nepse_row = pd.DataFrame({
-                "Date": [pd.to_datetime(date)],
-                "Total Positive": [total_positive],
-                "Total Stock": [None],  # To be filled by user
-                "Positive Change %": [None],
-                "Label": [None]
-            })
+            if all_sectors_have_data:
+                # Calculate total positive from all sectors
+                total_positive = sum(
+                    st.session_state.data[sector][
+                        pd.to_datetime(st.session_state.data[sector]["Date"]) == pd.to_datetime(date)
+                    ]["No of positive stock"].iloc[0]
+                    for sector in all_sectors
+                )
+                
+                # Create/update NEPSE entry with None for Total Stock (to be filled by user)
+                save_nepse_data(date, total_positive, total_stock=None)
+                st.session_state.nepse_equity = load_nepse_data()
             
-            st.session_state.nepse_equity = pd.concat(
-                [st.session_state.nepse_equity, nepse_row], 
-                ignore_index=True
-            ).drop_duplicates(subset=["Date"], keep="last")
-        
-        save_data()
-        st.success("Sector data updated successfully! Please update NEPSE Total Stock in the NEPSE Equity tab.")
-        
+            st.success("Data updated successfully! Please update NEPSE Total Stock in the NEPSE Equity tab.")
+            
     except Exception as e:
         st.error(f"Error updating data: {e}")
 
@@ -178,9 +188,30 @@ def display_data_editor(selected_sector):
     )
     
     if not edited_df.equals(df):
-        edited_df["Label"] = edited_df["Positive %"].apply(get_label)
-        st.session_state.data[selected_sector] = edited_df
-        save_data()
+        # Ensure all required columns are present
+        required_columns = ["Date", "No of positive stock", "No of negative stock", 
+                            "No of total stock", "No of No change", "Positive %", "Label"]
+        if all(col in edited_df.columns for col in required_columns):
+            # Update labels
+            edited_df["Label"] = edited_df["Positive %"].apply(get_label)
+            
+            # Save each row to Supabase
+            for _, row in edited_df.iterrows():
+                data_dict = {
+                    "date": row["Date"],
+                    "positive_stock": row["No of positive stock"],
+                    "negative_stock": row["No of negative stock"],
+                    "no_change": row["No of No change"],
+                    "positive_percentage": row["Positive %"],
+                    "total_stock": row["No of total stock"]
+                }
+                save_sector_data(selected_sector, data_dict)
+            
+            # Update session state
+            st.session_state.data[selected_sector] = edited_df
+            st.success("Data updated successfully!")
+        else:
+            st.error("Error: Edited data is missing required columns. Please check your input.")
 
 def display_nepse_equity():
     """Display NEPSE data editor with automatic updates."""
@@ -226,9 +257,16 @@ def display_nepse_equity():
     edited_df.loc[~mask, "Label"] = "unknown"
     
     if not edited_df.equals(df):
-        st.session_state.nepse_equity = edited_df
-        save_data()
+        # Save updated data to Supabase
+        for _, row in edited_df.iterrows():
+            save_nepse_data(
+                date=row["Date"],
+                total_positive=row["Total Positive"],
+                total_stock=row["Total Stock"]
+            )
+        st.session_state.nepse_equity = load_nepse_data()
         st.rerun()
+
 
 def plot_nepse_data():
     """Plot NEPSE Equity data separately."""
