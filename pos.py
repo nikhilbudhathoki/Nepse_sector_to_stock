@@ -197,9 +197,14 @@ def get_user_input():
     
     with col2:
         no_change = st.number_input("No of No change", min_value=0.0, format="%.2f")
-        total_stock = st.number_input("No of total stock (auto-calculated)", 
-                                    value=positive_stock + negative_stock + no_change,
-                                    disabled=True)
+        # Auto-calculate total_stock and disable the input field
+        total_stock = positive_stock + negative_stock + no_change
+        st.number_input(
+            "No of total stock (auto-calculated)",
+            value=total_stock,
+            disabled=True,  # Disable the input field
+            key="total_stock"  # Add a unique key to avoid conflicts
+        )
     
     if (positive_stock + negative_stock + no_change) == 0:
         st.warning("Total stock cannot be zero. Please enter valid numbers.")
@@ -214,7 +219,6 @@ def get_user_input():
         "no_change": no_change,
         "positive_percentage": positive_percentage
     }
-
 # Placeholder functions for NEPSE Equity Management (as referenced in tab2)
 def display_nepse_equity():
     st.subheader("NEPSE Equity Data")
