@@ -62,13 +62,13 @@ def create_connection():
         conn = sqlite3.connect(DB_NAME)
         # Create table if not exists
         conn.execute(f"""CREATE TABLE IF NOT EXISTS sma_data (
-                        {DATE_COL} DATE,
-                        {SECTOR_COL} TEXT,
-                        {SMA_COLUMNS[0]} REAL,
-                        {SMA_COLUMNS[1]} REAL,
-                        {SMA_COLUMNS[2]} REAL,
-                        {SMA_COLUMNS[3]} REAL,
-                        PRIMARY KEY ({DATE_COL}, {SECTOR_COL})
+                        "{DATE_COL}" DATE,
+                        "{SECTOR_COL}" TEXT,
+                        "{SMA_COLUMNS[0]}" REAL,
+                        "{SMA_COLUMNS[1]}" REAL,
+                        "{SMA_COLUMNS[2]}" REAL,
+                        "{SMA_COLUMNS[3]}" REAL,
+                        PRIMARY KEY ("{DATE_COL}", "{SECTOR_COL}")
                      )""")
         return conn
     except Error as e:
@@ -80,14 +80,19 @@ def create_connection():
 def load_sma_data():
     """Load data from SQLite database."""
     conn = create_connection()
+    if conn is None:
+        st.error("Failed to connect to the database.")
+        return pd.DataFrame(columns=[DATE_COL, SECTOR_COL] + SMA_COLUMNS)
+
     try:
-        df = pd.read_sql("SELECT * FROM sma_data", conn, parse_dates=[DATE_COL])
+        df = pd.read_sql(f'SELECT * FROM sma_data', conn, parse_dates=[DATE_COL])
         return df.sort_values(DATE_COL)
     except Exception as e:
         st.error(f"Data loading error: {str(e)}")
         return pd.DataFrame(columns=[DATE_COL, SECTOR_COL] + SMA_COLUMNS)
     finally:
-        if conn: conn.close()
+        if conn:
+            conn.close()
 
 # Save data to SQLite
 def save_sma_data(edited_df):
@@ -100,7 +105,7 @@ def save_sma_data(edited_df):
     try:
         # Delete existing sector data
         sector = edited_df[SECTOR_COL].iloc[0]
-        conn.execute(f"DELETE FROM sma_data WHERE {SECTOR_COL} = ?", (sector,))
+        conn.execute(f'DELETE FROM sma_data WHERE "{SECTOR_COL}" = ?', (sector,))
         
         # Insert new data
         edited_df.to_sql('sma_data', conn, if_exists='append', index=False)
