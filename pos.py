@@ -23,9 +23,18 @@ def get_label(value):
 def save_sector_data(sector, data_dict):
     """Save sector data to Supabase database."""
     try:
-        response = supabase.table('sector_data').upsert({
+        # Ensure the date is in the correct format
+        if "date" not in data_dict:
+            st.error("Error: 'date' key is missing in the input data.")
+            return False
+        
+        # Convert date to string format (YYYY-MM-DD)
+        date_str = data_dict["date"].strftime("%Y-%m-%d")
+        
+        # Save data to Supabase
+        response = supabase.table('pos').upsert({
             "sector": sector,
-            "date": data_dict["date"].strftime("%Y-%m-%d"),
+            "date": date_str,  # Use the formatted date string
             "positive_stock": float(data_dict["positive_stock"]),
             "negative_stock": float(data_dict["negative_stock"]),
             "no_change": float(data_dict["no_change"]),
@@ -176,7 +185,7 @@ def get_user_input():
     positive_percentage = (positive_stock / total_stock * 100) if total_stock > 0 else 0
     
     return {
-        "date": date,
+        "date": date,  # Ensure this key is included
         "positive_stock": positive_stock,
         "negative_stock": negative_stock,
         "total_stock": total_stock,
