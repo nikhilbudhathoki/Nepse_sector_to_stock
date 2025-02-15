@@ -147,6 +147,70 @@ def load_sector_data():
     except Exception as e:
         st.error(f"Error loading sector data: {e}")
         return pd.DataFrame()
+def load_saved_data(data_type='raw'):
+    """Load saved data from CSV files."""
+    try:
+        data_dir = os.path.join('stock_data', f'{data_type}_data')
+        available_dates = [d for d in os.listdir(data_dir) if os.path.isdir(os.path.join(data_dir, d))]
+        
+        if not available_dates:
+            st.warning(f"No {data_type} data files found.")
+            return None
+
+        selected_date = st.selectbox(f"Select a date for {data_type} data", available_dates)
+        file_path = os.path.join(data_dir, selected_date, 'stock_data.csv' if data_type == 'raw' else 'top_performers.csv')
+        
+        if not os.path.exists(file_path):
+            st.warning(f"No data found for the selected date: {selected_date}")
+            return None
+
+        return pd.read_csv(file_path)
+
+    except Exception as e:
+        st.error(f"Error loading {data_type} data: {e}")
+        return None
+
+# Add this to your POS page implementation
+def POS():
+    st.title("Sector Data Analysis")
+    
+    # Add connection to sector data entry database
+    sector_df = load_sector_data()  # Use existing load_sector_data function
+    if not sector_df.empty:
+        st.subheader("Sector Data from Database")
+        st.dataframe(sector_df)
+        
+        # Add analysis of sector data
+        st.subheader("Sector Performance Metrics")
+        fig = px.bar(sector_df, 
+                    x="sector", 
+                    y="positive_percentage", 
+                    color="label",
+                    title="Sector Performance by Positive Percentage")
+        st.plotly_chart(fig)
+        
+        # Add date filter for historical analysis
+        selected_date = st.selectbox("Select Date", pd.to_datetime(sector_df["Date"]).dt.date.unique())
+        filtered_data = sector_df[pd.to_datetime(sector_df["Date"]).dt.date == selected_date]
+        
+        st.subheader(f"Sector Status on {selected_date}")
+        cols = st.columns(3)
+        cols[0].metric("Total Sectors", len(filtered_data))
+        cols[1].metric("Strong Sectors", len(filtered_data[filtered_data["label"] == "strong"]))
+        cols[2].metric("Weak Sectors", len(filtered_data[filtered_data["label"] == "weak"]))
+        
+    else:
+        st.warning("No sector data available in database")
+
+    # Add integration with saved stock data
+    st.subheader("Cross-Analysis with Stock Data")
+    data_type = st.radio("Select Stock Data Type", ['raw', 'processed'], key='pos_analysis')
+    stock_df = load_saved_data(data_type)
+    
+    if stock_df is not None:
+        st.subheader(f"Combined Analysis with {data_type.capitalize()} Stock Data")
+        combined_df = pd.merge(sector_df, stock_df, left_on="date", right_on="Date")
+        st.dataframe(combined_df)
 
 def main():
     st.title("🚀 NEPSE Stock Performance Analyzer")
