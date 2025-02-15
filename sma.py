@@ -5,8 +5,8 @@ from datetime import datetime
 from supabase import create_client, Client
 
 # Configuration
-DATE_COL = 'DATE'
-SECTOR_COL = 'SECTOR'
+DATE_COL = 'date'  # Corrected to lowercase
+SECTOR_COL = 'sector'  # Corrected to lowercase
 SMA_COLUMNS = ['10_SMA', '20_SMA', '50_SMA', '200_SMA']
 ALLOWED_SECTORS = [
     "Hydropower", "C. Bank", "D. Bank", "Finance", "Hotels",
