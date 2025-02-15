@@ -98,16 +98,23 @@ def load_sector_data(sector):
         st.error(f"Error loading sector data: {e}")
         return pd.DataFrame()
 
-# Load NEPSE data from Supabase
 def load_nepse_data():
     """Load NEPSE equity data from Supabase database."""
     try:
-        # EXPLICITLY select the 'date' field to avoid missing-column issues
-        response = supabase.table('nepse_equity').select(
-            "date, total_positive, total_stock, positive_change_percentage, label"
-        ).order("date", desc=True).execute()
+        response = supabase.table('nepse_equity').select("*").order("date", desc=True).execute()
+        st.write("Raw Response from Supabase:", response)  # Debugging step
         
+        if not response.data:  # Check if data is empty
+            st.warning("No data available in 'nepse_equity' table.")
+            return pd.DataFrame()
+
         df = pd.DataFrame(response.data)
+        st.write("Converted DataFrame:", df)  # Debugging step
+
+        if 'date' not in df.columns:
+            st.error("Error: 'date' column is missing in the retrieved data.")
+            return pd.DataFrame()
+
         df["Date"] = pd.to_datetime(df["date"])
         df = df.drop(columns=["date"])
         df = df.rename(columns={
@@ -120,6 +127,7 @@ def load_nepse_data():
     except Exception as e:
         st.error(f"Error loading NEPSE data: {e}")
         return pd.DataFrame()
+
 
 # Initialize session state
 def initialize_session():
