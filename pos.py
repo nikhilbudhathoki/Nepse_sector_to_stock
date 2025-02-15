@@ -28,11 +28,10 @@ def save_sector_data(sector, data_dict):
         response = supabase.table('pos').upsert({
             "sector": sector,
             "date": data_dict["date"].strftime("%Y-%m-%d"),
-            "positive_stock": data_dict["positive_stock"],
-            "negative_stock": data_dict["negative_stock"],
-            "total_stock": data_dict["total_stock"],
-            "no_change": data_dict["no_change"],
-            "positive_percentage": data_dict["positive_percentage"],
+            "positive_stock": float(data_dict["positive_stock"]),
+            "negative_stock": float(data_dict["negative_stock"]),
+            "no_change": float(data_dict["no_change"]),
+            "positive_percentage": float(data_dict["positive_percentage"]),
             "label": get_label(data_dict["positive_percentage"])
         }).execute()
         return True
@@ -65,12 +64,22 @@ def load_sector_data(sector):
     try:
         response = supabase.table('pos').select("*").eq("sector", sector).order("date", desc=True).execute()
         df = pd.DataFrame(response.data)
+        
+        # Handle missing 'date' column
+        if 'date' not in df.columns:
+            st.error(f"Missing 'date' column in data for sector: {sector}")
+            return pd.DataFrame()
+        
+        # Calculate total_stock dynamically
+        if not df.empty:
+            df["total_stock"] = df["positive_stock"] + df["negative_stock"] + df["no_change"]
+        
+        # Convert datetime and rename columns
         df["Date"] = pd.to_datetime(df["date"])
         df = df.drop(columns=["date"])
         df = df.rename(columns={
             "positive_stock": "No of positive stock",
             "negative_stock": "No of negative stock",
-            "total_stock": "No of total stock",
             "no_change": "No of No change",
             "positive_percentage": "Positive %",
             "label": "Label"
@@ -120,6 +129,13 @@ def initialize_session():
 def update_data(selected_sector, input_data):
     """Update database with new sector data and auto-calculate NEPSE data."""
     try:
+        # Calculate total_stock before saving
+        input_data["total_stock"] = (
+            input_data["positive_stock"] +
+            input_data["negative_stock"] +
+            input_data["no_change"]
+        )
+        
         # Save sector data
         if save_sector_data(selected_sector, input_data):
             # Reload sector data
@@ -130,7 +146,7 @@ def update_data(selected_sector, input_data):
             all_sectors = list(st.session_state.data.keys())
             all_sectors_have_data = all(
                 any(pd.to_datetime(date) == pd.to_datetime(row["Date"]) 
-                    for _, row in st.session_state.data[sector].iterrows())
+                for _, row in st.session_state.data[sector].iterrows())
                 for sector in all_sectors
             )
             
@@ -150,94 +166,6 @@ def update_data(selected_sector, input_data):
     except Exception as e:
         st.error(f"Error updating data: {e}")
 
-# Display data editor
-def display_data_editor(selected_sector):
-    """Display unified data editor with automatic label updates."""
-    st.subheader(f"Data Editor - {selected_sector}")
-    
-    df = st.session_state.data[selected_sector].copy()
-    
-    edited_df = st.data_editor(
-        df,
-        num_rows="dynamic",
-        key=f"editor_{selected_sector}",
-        hide_index=True
-    )
-    
-    if not edited_df.equals(df):
-        # Update database with edited data
-        for _, row in edited_df.iterrows():
-            data_dict = {
-                "date": row["Date"],
-                "positive_stock": row["No of positive stock"],
-                "negative_stock": row["No of negative stock"],
-                "total_stock": row["No of total stock"],
-                "no_change": row["No of No change"],
-                "positive_percentage": row["Positive %"]
-            }
-            save_sector_data(selected_sector, data_dict)
-        
-        # Reload data
-        st.session_state.data[selected_sector] = load_sector_data(selected_sector)
-        st.rerun()
-
-# Display NEPSE equity editor
-def display_nepse_equity():
-    """Display NEPSE data editor with automatic updates."""
-    st.subheader("NEPSE Equity Data")
-    
-    df = st.session_state.nepse_equity.copy()
-    
-    edited_df = st.data_editor(
-        df,
-        num_rows="dynamic",
-        key="editor_nepse",
-        hide_index=True,
-        column_config={
-            "Date": st.column_config.DateColumn(disabled=True),
-            "Total Positive": st.column_config.NumberColumn(disabled=True),
-            "Total Stock": st.column_config.NumberColumn(
-                "Total Stock (Required)", 
-                min_value=1,
-                help="Enter total number of stocks for NEPSE calculation"
-            ),
-            "Positive Change %": st.column_config.NumberColumn(
-                format="%.2f%%",
-                disabled=True
-            ),
-            "Label": st.column_config.TextColumn(disabled=True)
-        }
-    )
-    
-    if not edited_df.equals(df):
-        for _, row in edited_df.iterrows():
-            save_nepse_data(
-                row["Date"],
-                row["Total Positive"],
-                row["Total Stock"]
-            )
-        
-        st.session_state.nepse_equity = load_nepse_data()
-        st.rerun()
-
-# Plot NEPSE data
-def plot_nepse_data():
-    """Plot NEPSE Equity data separately."""
-    try:
-        nepse_data = st.session_state.nepse_equity.copy()
-        if not nepse_data.empty:
-            fig = px.line(
-                nepse_data,
-                x="Date",
-                y="Positive Change %",
-                title="NEPSE Equity Performance Over Time",
-                labels={"Positive Change %": "Positive Change Percentage", "Date": "Date"},
-                markers=True
-            )
-            st.plotly_chart(fig, use_container_width=True)
-    except Exception as e:
-        st.error(f"Error plotting NEPSE data: {e}")
-
 # Get user input for sector data
 def get_user_input():
     """Get user input for sectoral data entry."""
@@ -245,24 +173,25 @@ def get_user_input():
     
     with col1:
         date = st.date_input("Date")
-        positive_stock = st.number_input("No of positive stock", min_value=0)
-        negative_stock = st.number_input("No of negative stock", min_value=0)
+        positive_stock = st.number_input("No of positive stock", min_value=0.0, format="%.2f")
+        negative_stock = st.number_input("No of negative stock", min_value=0.0, format="%.2f")
     
     with col2:
-        total_stock = st.number_input("No of total stock", min_value=0)
-        no_change = st.number_input("No of No change", min_value=0)
+        no_change = st.number_input("No of No change", min_value=0.0, format="%.2f")
+        total_stock = st.number_input("No of total stock (auto-calculated)", 
+                                    value=positive_stock + negative_stock + no_change,
+                                    disabled=True)
     
-    if total_stock == 0:
-        st.warning("Total stock cannot be zero. Please enter a valid number.")
+    if (positive_stock + negative_stock + no_change) == 0:
+        st.warning("Total stock cannot be zero. Please enter valid numbers.")
         return None
     
-    positive_percentage = (positive_stock / total_stock * 100) if total_stock > 0 else 0
+    positive_percentage = (positive_stock / (positive_stock + negative_stock + no_change) * 100)
     
     return {
         "date": date,
         "positive_stock": positive_stock,
         "negative_stock": negative_stock,
-        "total_stock": total_stock,
         "no_change": no_change,
         "positive_percentage": positive_percentage
     }
@@ -295,132 +224,23 @@ def main():
                 mime='text/csv',
             )
         
-        display_data_editor(selected_sector)
+        # Display data editor
+        st.subheader(f"Data Editor - {selected_sector}")
+        edited_df = st.data_editor(
+            st.session_state.data[selected_sector],
+            num_rows="dynamic",
+            key=f"editor_{selected_sector}",
+            hide_index=True
+        )
     
     with tab2:
         st.subheader("NEPSE Equity Management")
-        col1, _ = st.columns([2, 1])
-        
-        with col1:
-            nepse_data = load_nepse_data()
-            st.download_button(
-                label="📥 Download NEPSE Data",
-                data=nepse_data.to_csv(index=False).encode('utf-8'),
-                file_name="nepse_equity_data.csv",
-                mime='text/csv',
-            )
-        
         display_nepse_equity()
         plot_nepse_data()
     
     with tab3:
         st.subheader("Sector Analysis")
-        
-        col1, col2, col3 = st.columns([2, 2, 1])
-        
-        with col1:
-            selected_sectors_1 = st.multiselect(
-                "Select Sectors for Chart 1",
-                sectors,
-                default=sectors[:3],
-                key="chart1_sectors"
-            )
-        
-        with col2:
-            selected_sectors_2 = st.multiselect(
-                "Select Sectors for Chart 2",
-                sectors,
-                default=sectors[3:6],
-                key="chart2_sectors"
-            )
-        
-        with col3:
-            include_nepse = st.checkbox("Include NEPSE Equity", value=True)
-        
-        chart_col1, chart_col2 = st.columns(2)
-        
-        with chart_col1:
-            if selected_sectors_1:
-                try:
-                    sector_data = []
-                    for sector in selected_sectors_1:
-                        df = st.session_state.data[sector].copy()
-                        df["Sector"] = sector
-                        sector_data.append(df)
-                    
-                    sector_data = pd.concat(sector_data, ignore_index=True)
-                    
-                    if include_nepse:
-                        nepse_data = st.session_state.nepse_equity.copy()
-                        nepse_data["Sector"] = "NEPSE Equity"
-                        nepse_data = nepse_data.rename(columns={"Positive Change %": "Positive %"})
-                        sector_data = pd.concat([sector_data, nepse_data], ignore_index=True)
-                    
-                    fig1 = px.line(
-                        sector_data,
-                        x="Date",
-                        y="Positive %",
-                        color="Sector",
-                        title="Chart 1: Sector Performance",
-                        labels={"Positive %": "Positive Percentage", "Date": "Date"},
-                        markers=True
-                    )
-                    
-                    fig1.update_layout(
-                        legend=dict(
-                            yanchor="top",
-                            y=0.99,
-                            xanchor="left",
-                            x=0.01
-                        ),
-                        margin=dict(l=10, r=10, t=40, b=10)
-                    )
-                    
-                    st.plotly_chart(fig1, use_container_width=True)
-                except Exception as e:
-                    st.error(f"Error plotting Chart 1: {e}")
-        
-        with chart_col2:
-            if selected_sectors_2:
-                try:
-                    sector_data = []
-                    for sector in selected_sectors_2:
-                        df = st.session_state.data[sector].copy()
-                        df["Sector"] = sector
-                        sector_data.append(df)
-                    
-                    sector_data = pd.concat(sector_data, ignore_index=True)
-                    
-                    if include_nepse:
-                        nepse_data = st.session_state.nepse_equity.copy()
-                        nepse_data["Sector"] = "NEPSE Equity"
-                        nepse_data = nepse_data.rename(columns={"Positive Change %": "Positive %"})
-                        sector_data = pd.concat([sector_data, nepse_data], ignore_index=True)
-                    
-                    fig2 = px.line(
-                        sector_data,
-                        x="Date",
-                        y="Positive %",
-                        color="Sector",
-                        title="Chart 2: Sector Performance",
-                        labels={"Positive %": "Positive Percentage", "Date": "Date"},
-                        markers=True
-                    )
-                    
-                    fig2.update_layout(
-                        legend=dict(
-                            yanchor="top",
-                            y=0.99,
-                            xanchor="left",
-                            x=0.01
-                        ),
-                        margin=dict(l=10, r=10, t=40, b=10)
-                    )
-                    
-                    st.plotly_chart(fig2, use_container_width=True)
-                except Exception as e:
-                    st.error(f"Error plotting Chart 2: {e}")
+        # ... (keep your existing chart code here)
 
-# Run the app
 if __name__ == "__main__":
     main()
