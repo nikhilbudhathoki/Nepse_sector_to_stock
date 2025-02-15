@@ -102,7 +102,11 @@ def load_sector_data(sector):
 def load_nepse_data():
     """Load NEPSE equity data from Supabase database."""
     try:
-        response = supabase.table('nepse_equity').select("*").order("date", desc=True).execute()
+        # EXPLICITLY select the 'date' field to avoid missing-column issues
+        response = supabase.table('nepse_equity').select(
+            "date, total_positive, total_stock, positive_change_percentage, label"
+        ).order("date", desc=True).execute()
+        
         df = pd.DataFrame(response.data)
         df["Date"] = pd.to_datetime(df["date"])
         df = df.drop(columns=["date"])
