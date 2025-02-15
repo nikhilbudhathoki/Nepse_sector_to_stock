@@ -65,30 +65,27 @@ def load_sector_data(sector):
         response = supabase.table('pos').select("*").eq("sector", sector).order("date", desc=True).execute()
         df = pd.DataFrame(response.data)
         
+        # Check if the DataFrame is empty (no data for the sector)
+        if df.empty:
+            return pd.DataFrame()  # Return empty DataFrame without error
+        
         # Check if the 'date' column exists
         if 'date' not in df.columns:
-            st.error(f"Error: 'date' column not found in the 'pos' table for sector: {sector}")
+            st.error(f"Critical Error: 'date' column missing in 'pos' table for {sector}")
             return pd.DataFrame()
         
-        # Check if the 'date' column is empty
-        if df['date'].isnull().all():
-            st.error(f"Error: 'date' column is empty in the 'pos' table for sector: {sector}")
-            return pd.DataFrame()
-        
-        # Convert 'date' column to datetime
+        # Validate 'date' values
         try:
             df["Date"] = pd.to_datetime(df["date"])
         except Exception as e:
-            st.error(f"Error converting 'date' column to datetime: {e}")
+            st.error(f"Invalid date format in 'pos' table for {sector}: {e}")
             return pd.DataFrame()
         
         # Calculate total_stock dynamically
-        if not df.empty:
-            df["total_stock"] = df["positive_stock"] + df["negative_stock"] + df["no_change"]
+        df["total_stock"] = df["positive_stock"] + df["negative_stock"] + df["no_change"]
         
-        # Drop the original 'date' column and rename others
-        df = df.drop(columns=["date"])
-        df = df.rename(columns={
+        # Rename columns
+        df = df.drop(columns=["date"]).rename(columns={
             "positive_stock": "No of positive stock",
             "negative_stock": "No of negative stock",
             "no_change": "No of No change",
@@ -96,6 +93,7 @@ def load_sector_data(sector):
             "label": "Label"
         })
         return df
+        
     except Exception as e:
         st.error(f"Error loading sector data: {e}")
         return pd.DataFrame()
@@ -129,7 +127,13 @@ def initialize_session():
     ]
     
     if 'data' not in st.session_state:
-        st.session_state.data = {sector: load_sector_data(sector) for sector in sectors}
+        st.session_state.data = {}
+        for sector in sectors:
+            df = load_sector_data(sector)
+            if not df.empty:
+                st.session_state.data[sector] = df
+            else:
+                st.session_state.data[sector] = pd.DataFrame()  # Initialize empty
     
     if 'nepse_equity' not in st.session_state:
         st.session_state.nepse_equity = load_nepse_data()
