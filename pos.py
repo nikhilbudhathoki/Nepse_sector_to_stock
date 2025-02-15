@@ -3,6 +3,8 @@ import pandas as pd
 import plotly.express as px
 from pathlib import Path
 from datetime import datetime
+import streamlit as st
+from supabase import create_client
 
 def get_label(value):
     """Determine label based on threshold values."""
