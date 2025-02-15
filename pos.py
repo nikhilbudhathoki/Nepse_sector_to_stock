@@ -60,26 +60,43 @@ def save_nepse_data(date, total_positive, total_stock=None):
 
 # Load sector data from Supabase
 def load_sector_data(sector):
-    """Fetch sector data from Supabase and recalculate total_stock."""
+    """Load sector data from Supabase database."""
     try:
-        response = supabase.table(sector).select("*").execute()
-        data = response.data
-        if not data:
-            return pd.DataFrame()  # Return an empty DataFrame if no data is found
-
-        df = pd.DataFrame(data)
+        response = supabase.table('pos').select("*").eq("sector", sector).order("date", desc=True).execute()
+        df = pd.DataFrame(response.data)
         
-        # Ensure all required columns exist
-        if {"positive_stock", "negative_stock", "no_change"}.issubset(df.columns):
-            df["total_stock"] = df["positive_stock"] + df["negative_stock"] + df["no_change"]
+        # Check if the DataFrame is empty (no data for the sector)
+        if df.empty:
+            return pd.DataFrame()  # Return empty DataFrame without error
         
-        df["Date"] = pd.to_datetime(df["Date"])  # Ensure date is in proper format
+        # Check if the 'date' column exists
+        if 'date' not in df.columns:
+            st.error(f"Critical Error: 'date' column missing in 'pos' table for {sector}")
+            return pd.DataFrame()
+        
+        # Validate 'date' values
+        try:
+            df["Date"] = pd.to_datetime(df["date"])
+        except Exception as e:
+            st.error(f"Invalid date format in 'pos' table for {sector}: {e}")
+            return pd.DataFrame()
+        
+        # Calculate total_stock dynamically
+        df["total_stock"] = df["positive_stock"] + df["negative_stock"] + df["no_change"]
+        
+        # Rename columns
+        df = df.drop(columns=["date"]).rename(columns={
+            "positive_stock": "No of positive stock",
+            "negative_stock": "No of negative stock",
+            "no_change": "No of No change",
+            "positive_percentage": "Positive %",
+            "label": "Label"
+        })
         return df
-
+        
     except Exception as e:
-        st.error(f"Error loading data for {sector}: {e}")
+        st.error(f"Error loading sector data: {e}")
         return pd.DataFrame()
-
 
 def load_nepse_data():
     """Load NEPSE equity data from Supabase database."""
@@ -137,56 +154,73 @@ def initialize_session():
 
 # Update data in Supabase
 def update_data(selected_sector, input_data):
-    """Update database with new sector data and manually calculate total_stock."""
+    """Update database with new sector data and auto-calculate NEPSE data."""
     try:
-        # Ensure total_stock is correctly computed
-        input_data["total_stock"] = input_data["positive_stock"] + input_data["negative_stock"] + input_data["no_change"]
-
-        # Save the updated data to Supabase
+        # Calculate total_stock before saving
+        input_data["total_stock"] = (
+            input_data["positive_stock"] +
+            input_data["negative_stock"] +
+            input_data["no_change"]
+        )
+        
+        # Save sector data
         if save_sector_data(selected_sector, input_data):
-            # Reload sector data for the updated sector
+            # Reload sector data
             st.session_state.data[selected_sector] = load_sector_data(selected_sector)
-
-            # Update NEPSE Equity based on the manually calculated total stock
+            
+            # Update NEPSE Equity data
             date = input_data["date"]
-            total_positive = 0
-
-            for sector, df in st.session_state.data.items():
-                if not df.empty:
-                    matching_rows = df[pd.to_datetime(df["Date"]) == pd.to_datetime(date)]
-                    if not matching_rows.empty:
-                        total_positive += matching_rows["positive_stock"].iloc[0]
-
-            # Only update NEPSE equity if there is valid data
-            if total_positive > 0:
+            all_sectors = list(st.session_state.data.keys())
+            all_sectors_have_data = all(
+                any(pd.to_datetime(date) == pd.to_datetime(row["Date"]) 
+                for _, row in st.session_state.data[sector].iterrows())
+                for sector in all_sectors
+            )
+            
+            if all_sectors_have_data:
+                total_positive = sum(
+                    st.session_state.data[sector][
+                        pd.to_datetime(st.session_state.data[sector]["Date"]) == pd.to_datetime(date)
+                    ]["No of positive stock"].iloc[0]
+                    for sector in all_sectors
+                )
+                
                 save_nepse_data(date, total_positive)
                 st.session_state.nepse_equity = load_nepse_data()
-
+            
             st.success("Data updated successfully! Please update NEPSE Total Stock in the NEPSE Equity tab.")
-
+            
     except Exception as e:
         st.error(f"Error updating data: {e}")
 
 # Get user input for sector data
 def get_user_input():
-    """Get user input from Streamlit and compute total_stock manually."""
-    date = st.date_input("Select Date")
-    positive_stock = st.number_input("No of positive stock", min_value=0, step=1)
-    negative_stock = st.number_input("No of negative stock", min_value=0, step=1)
-    no_change = st.number_input("No of No change", min_value=0, step=1)
-
-    # Manually calculate total stock
-    total_stock = positive_stock + negative_stock + no_change
+    """Get user input for sectoral data entry."""
+    col1, col2 = st.columns(2)
     
-    # Display the total stock (read-only)
-    st.number_input("No of total stock (auto-calculated)", value=total_stock, disabled=True)
-
+    with col1:
+        date = st.date_input("Date")
+        positive_stock = st.number_input("No of positive stock", min_value=0.0, format="%.2f")
+        negative_stock = st.number_input("No of negative stock", min_value=0.0, format="%.2f")
+    
+    with col2:
+        no_change = st.number_input("No of No change", min_value=0.0, format="%.2f")
+        total_stock = st.number_input("No of total stock (auto-calculated)", 
+                                    value=positive_stock + negative_stock + no_change,
+                                    disabled=True)
+    
+    if (positive_stock + negative_stock + no_change) == 0:
+        st.warning("Total stock cannot be zero. Please enter valid numbers.")
+        return None
+    
+    positive_percentage = (positive_stock / (positive_stock + negative_stock + no_change) * 100)
+    
     return {
         "date": date,
         "positive_stock": positive_stock,
         "negative_stock": negative_stock,
         "no_change": no_change,
-        "total_stock": total_stock
+        "positive_percentage": positive_percentage
     }
 
 # Placeholder functions for NEPSE Equity Management (as referenced in tab2)
