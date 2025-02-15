@@ -92,34 +92,47 @@ def load_sector_data(sector):
         return pd.DataFrame()
 
 def load_nepse_data():
-    """Load NEPSE equity data from Supabase database."""
+    """Load NEPSE equity data from Supabase database with improved error handling."""
     try:
         response = supabase.table('nepse_equity').select("*").order("date", desc=True).execute()
-        st.write("Raw Response from Supabase:", response)
         
         if not response.data:
             st.warning("No data available in 'nepse_equity' table.")
-            return pd.DataFrame()
+            # Return empty DataFrame with correct columns
+            return pd.DataFrame(columns=[
+                "Date", "Total Positive", "Total Stock", 
+                "Positive Change %", "Label"
+            ])
 
         df = pd.DataFrame(response.data)
-        st.write("Converted DataFrame:", df)
-
+        
+        # Ensure date column exists
         if 'date' not in df.columns:
             st.error("Error: 'date' column is missing in the retrieved data.")
-            return pd.DataFrame()
+            return pd.DataFrame(columns=[
+                "Date", "Total Positive", "Total Stock", 
+                "Positive Change %", "Label"
+            ])
 
+        # Convert date column
         df["Date"] = pd.to_datetime(df["date"])
         df = df.drop(columns=["date"])
+        
+        # Rename columns
         df = df.rename(columns={
             "total_positive": "Total Positive",
             "total_stock": "Total Stock",
             "positive_change_percentage": "Positive Change %",
             "label": "Label"
         })
+        
         return df
     except Exception as e:
         st.error(f"Error loading NEPSE data: {e}")
-        return pd.DataFrame()
+        return pd.DataFrame(columns=[
+            "Date", "Total Positive", "Total Stock", 
+            "Positive Change %", "Label"
+        ])
 
 def initialize_session():
     """Initialize session state with data from Supabase database."""
@@ -221,11 +234,18 @@ def display_data_editor(selected_sector):
         save_sector_data(selected_sector, edited_df.iloc[-1].to_dict())
 
 def display_nepse_equity():
-    """Display NEPSE data editor with automatic updates."""
+    """Display NEPSE data editor with improved error handling."""
     st.subheader("NEPSE Equity Data")
     
+    # Initialize nepse_equity in session state if it doesn't exist
+    if 'nepse_equity' not in st.session_state:
+        st.session_state.nepse_equity = load_nepse_data()
+    
     df = st.session_state.nepse_equity.copy()
-    df = df.sort_values("Date", ascending=False)
+    
+    # Only sort if DataFrame is not empty
+    if not df.empty and "Date" in df.columns:
+        df = df.sort_values("Date", ascending=False)
     
     edited_df = st.data_editor(
         df,
@@ -233,25 +253,52 @@ def display_nepse_equity():
         key="editor_nepse",
         hide_index=True,
         column_config={
-            "Date": st.column_config.DateColumn(disabled=True),
-            "Total Positive": st.column_config.NumberColumn(disabled=True),
+            "Date": st.column_config.DateColumn(
+                "Date",
+                help="Date of the entry",
+                required=True
+            ),
+            "Total Positive": st.column_config.NumberColumn(
+                "Total Positive",
+                help="Total number of positive stocks",
+                required=True,
+                min_value=0
+            ),
             "Total Stock": st.column_config.NumberColumn(
                 "Total Stock (Required)", 
-                min_value=1,
-                help="Enter total number of stocks for NEPSE calculation"
+                help="Enter total number of stocks for NEPSE calculation",
+                required=True,
+                min_value=1
             ),
             "Positive Change %": st.column_config.NumberColumn(
+                "Positive Change %",
+                help="Percentage of positive change",
                 format="%.2f%%",
                 disabled=True
             ),
-            "Label": st.column_config.TextColumn(disabled=True)
+            "Label": st.column_config.TextColumn(
+                "Label",
+                help="Strength indicator",
+                disabled=True
+            )
         }
     )
     
     if not edited_df.equals(df):
+        # Calculate positive change percentage and label for new/edited rows
+        edited_df["Positive Change %"] = (edited_df["Total Positive"] / edited_df["Total Stock"] * 100).round(2)
+        edited_df["Label"] = edited_df["Positive Change %"].apply(get_label)
+        
         st.session_state.nepse_equity = edited_df
-        save_nepse_data(edited_df.iloc[-1]["Date"], edited_df.iloc[-1]["Total Positive"], edited_df.iloc[-1]["Total Stock"])
-
+        
+        # Save each modified row
+        for _, row in edited_df.iterrows():
+            if pd.notna(row["Date"]) and pd.notna(row["Total Positive"]) and pd.notna(row["Total Stock"]):
+                save_nepse_data(
+                    row["Date"],
+                    row["Total Positive"],
+                    row["Total Stock"]
+                )
 def plot_nepse_data():
     """Plot NEPSE Equity data separately."""
     try:
