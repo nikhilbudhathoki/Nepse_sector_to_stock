@@ -16,82 +16,90 @@ logging.basicConfig(
     filemode='a'
 )
 
+# -----------------------------------------------------------------------------
+# Database Manager (using a new connection for every operation)
+# -----------------------------------------------------------------------------
 class DatabaseManager:
     def __init__(self, db_path="stock_data.db"):
         self.db_path = db_path
-        self.conn = None
-        self.cursor = None
-        self.connect()
         self.create_tables()
-    
-    def connect(self):
-        try:
-            self.conn = sqlite3.connect(self.db_path)
-            self.cursor = self.conn.cursor()
-        except sqlite3.Error as e:
-            logging.error(f"Database connection error: {e}")
-    
+
+    def get_connection(self):
+        """
+        Create and return a new SQLite connection.
+        Using check_same_thread=False ensures the connection works across threads.
+        """
+        return sqlite3.connect(self.db_path, check_same_thread=False)
+
     def create_tables(self):
         try:
-            # Create raw data table
-            self.cursor.execute('''
-                CREATE TABLE IF NOT EXISTS raw_stock_data (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    date TEXT,
-                    data TEXT,
-                    UNIQUE(date)
-                )
-            ''')
-            
-            # Create processed data table
-            self.cursor.execute('''
-                CREATE TABLE IF NOT EXISTS processed_stock_data (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    date TEXT,
-                    data TEXT,
-                    UNIQUE(date)
-                )
-            ''')
-            self.conn.commit()
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                # Create raw data table
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS raw_stock_data (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        date TEXT,
+                        data TEXT,
+                        UNIQUE(date)
+                    )
+                ''')
+                # Create processed data table
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS processed_stock_data (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        date TEXT,
+                        data TEXT,
+                        UNIQUE(date)
+                    )
+                ''')
+                conn.commit()
         except sqlite3.Error as e:
             logging.error(f"Error creating tables: {e}")
-    
+
     def save_data(self, df, date, data_type):
         try:
             table_name = f"{data_type}_stock_data"
             data_json = df.to_json()
-            
-            # Using REPLACE to handle updates for existing dates
-            self.cursor.execute(f'''
-                INSERT OR REPLACE INTO {table_name} (date, data)
-                VALUES (?, ?)
-            ''', (date, data_json))
-            self.conn.commit()
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(f'''
+                    INSERT OR REPLACE INTO {table_name} (date, data)
+                    VALUES (?, ?)
+                ''', (date, data_json))
+                conn.commit()
         except sqlite3.Error as e:
             logging.error(f"Error saving data: {e}")
-    
+
     def load_data(self, date, data_type):
         try:
             table_name = f"{data_type}_stock_data"
-            self.cursor.execute(f"SELECT data FROM {table_name} WHERE date = ?", (date,))
-            result = self.cursor.fetchone()
-            if result:
-                return pd.read_json(result[0])
-            return None
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(f"SELECT data FROM {table_name} WHERE date = ?", (date,))
+                result = cursor.fetchone()
+                if result:
+                    return pd.read_json(result[0])
+                return None
         except sqlite3.Error as e:
             logging.error(f"Error loading data: {e}")
             return None
-    
+
     def get_available_dates(self, data_type):
         try:
             table_name = f"{data_type}_stock_data"
-            self.cursor.execute(f"SELECT date FROM {table_name} ORDER BY date DESC")
-            dates = [row[0] for row in self.cursor.fetchall()]
-            return dates
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(f"SELECT date FROM {table_name} ORDER BY date DESC")
+                dates = [row[0] for row in cursor.fetchall()]
+                return dates
         except sqlite3.Error as e:
             logging.error(f"Error getting dates: {e}")
             return []
 
+# -----------------------------------------------------------------------------
+# Stock Data Manager
+# -----------------------------------------------------------------------------
 class StockDataManager:
     def __init__(self, base_dir='stock_data'):
         self.base_dir = base_dir
@@ -172,7 +180,7 @@ class StockDataManager:
             df[change_col] = pd.to_numeric(df[change_col].str.replace('%', ''), errors='coerce')
             df[volume_col] = pd.to_numeric(df[volume_col].str.replace(',', ''), errors='coerce')
 
-            # Filter rows with % change > threshold
+            # Filter rows with % change >= threshold and volume above median
             filtered_df = df[
                 (df[change_col] >= change_threshold) & 
                 (df[volume_col] > df[volume_col].median())
@@ -261,6 +269,9 @@ class StockDataManager:
         all_dates = sorted(db_dates.union(fs_dates), reverse=True)
         return all_dates
 
+# -----------------------------------------------------------------------------
+# Streamlit App
+# -----------------------------------------------------------------------------
 def main():
     st.title("🚀 NEPSE Stock Performance Analyzer")
 
@@ -404,5 +415,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
