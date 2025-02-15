@@ -152,29 +152,35 @@ def initialize_session():
 def update_data(selected_sector, input_data):
     """Update database with new sector data and auto-calculate NEPSE data."""
     try:
+        # Save the sector data first
         if save_sector_data(selected_sector, input_data):
             st.session_state.data[selected_sector] = load_sector_data(selected_sector)
             
+            # Aggregate data for NEPSE equity
             date = input_data["date"]
             all_sectors = list(st.session_state.data.keys())
-            all_sectors_have_data = all(
-                any(pd.to_datetime(date) == pd.to_datetime(row["Date"]) 
-                for _, row in st.session_state.data[sector].iterrows())
-                for sector in all_sectors
-            )
             
-            if all_sectors_have_data:
-                total_positive = sum(
-                    st.session_state.data[sector][
-                        pd.to_datetime(st.session_state.data[sector]["Date"]) == pd.to_datetime(date)
-                    ]["No of positive stock"].iloc[0]
-                    for sector in all_sectors
-                )
-                
-                save_nepse_data(date, total_positive, input_data["total_stock"])
+            # Initialize totals
+            total_positive = 0
+            total_stock = 0
+            
+            # Loop through all sectors to calculate totals
+            for sector in all_sectors:
+                sector_df = st.session_state.data[sector]
+                if not sector_df.empty:
+                    # Filter data for the current date
+                    date_filter = pd.to_datetime(sector_df["Date"]) == pd.to_datetime(date)
+                    if any(date_filter):
+                        total_positive += sector_df[date_filter]["No of positive stock"].iloc[0]
+                        total_stock += sector_df[date_filter]["No of total stock"].iloc[0]
+            
+            # Save the aggregated data to the NEPSE equity table
+            if total_stock > 0:  # Ensure total_stock is not zero
+                save_nepse_data(date, total_positive, total_stock)
                 st.session_state.nepse_equity = load_nepse_data()
-            
-            st.success("Data updated successfully! Please update NEPSE Total Stock in the NEPSE Equity tab.")
+                st.success("Data updated successfully!")
+            else:
+                st.warning("Total stock is zero. Cannot calculate NEPSE equity data.")
             
     except Exception as e:
         st.error(f"Error updating data: {e}")
@@ -211,12 +217,20 @@ def get_user_input():
 # Placeholder functions for NEPSE Equity Management (as referenced in tab2)
 def display_nepse_equity():
     st.subheader("NEPSE Equity Data")
-    st.dataframe(st.session_state.nepse_equity)
+    if not st.session_state.nepse_equity.empty:
+        st.dataframe(st.session_state.nepse_equity)
+    else:
+        st.write("No NEPSE equity data available.")
 
 def plot_nepse_data():
     st.subheader("NEPSE Equity Chart")
     if not st.session_state.nepse_equity.empty:
-        fig = px.line(st.session_state.nepse_equity, x="Date", y="Total Positive", title="NEPSE Equity Trend")
+        fig = px.line(
+            st.session_state.nepse_equity,
+            x="Date",
+            y="Total Positive",
+            title="NEPSE Equity Trend"
+        )
         st.plotly_chart(fig)
     else:
         st.write("No NEPSE equity data available.")
@@ -264,7 +278,6 @@ def main():
     
     with tab3:
         st.subheader("Sector Analysis")
-        # ... (keep your existing chart code here)
-
+        # Add your analysis and chart code here
 if __name__ == "__main__":
     main()
