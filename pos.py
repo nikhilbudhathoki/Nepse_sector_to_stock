@@ -32,7 +32,8 @@ def save_sector_data(sector, data_dict):
             "negative_stock": float(data_dict["negative_stock"]),
             "no_change": float(data_dict["no_change"]),
             "positive_percentage": float(data_dict["positive_percentage"]),
-            "label": get_label(data_dict["positive_percentage"])
+            "label": get_label(data_dict["positive_percentage"]),
+            "total_stock": float(data_dict["positive_stock"] + data_dict["negative_stock"] + data_dict["no_change"])
         }).execute()
         return True
     except Exception as e:
@@ -65,32 +66,28 @@ def load_sector_data(sector):
         response = supabase.table('pos').select("*").eq("sector", sector).order("date", desc=True).execute()
         df = pd.DataFrame(response.data)
         
-        # Check if the DataFrame is empty (no data for the sector)
         if df.empty:
-            return pd.DataFrame()  # Return empty DataFrame without error
+            return pd.DataFrame()
         
-        # Check if the 'date' column exists
         if 'date' not in df.columns:
             st.error(f"Critical Error: 'date' column missing in 'pos' table for {sector}")
             return pd.DataFrame()
         
-        # Validate 'date' values
         try:
             df["Date"] = pd.to_datetime(df["date"])
         except Exception as e:
             st.error(f"Invalid date format in 'pos' table for {sector}: {e}")
             return pd.DataFrame()
         
-        # Calculate total_stock dynamically
         df["total_stock"] = df["positive_stock"] + df["negative_stock"] + df["no_change"]
         
-        # Rename columns
         df = df.drop(columns=["date"]).rename(columns={
             "positive_stock": "No of positive stock",
             "negative_stock": "No of negative stock",
             "no_change": "No of No change",
             "positive_percentage": "Positive %",
-            "label": "Label"
+            "label": "Label",
+            "total_stock": "No of total stock"
         })
         return df
         
@@ -102,14 +99,14 @@ def load_nepse_data():
     """Load NEPSE equity data from Supabase database."""
     try:
         response = supabase.table('nepse_equity').select("*").order("date", desc=True).execute()
-        st.write("Raw Response from Supabase:", response)  # Debugging step
+        st.write("Raw Response from Supabase:", response)
         
-        if not response.data:  # Check if data is empty
+        if not response.data:
             st.warning("No data available in 'nepse_equity' table.")
             return pd.DataFrame()
 
         df = pd.DataFrame(response.data)
-        st.write("Converted DataFrame:", df)  # Debugging step
+        st.write("Converted DataFrame:", df)
 
         if 'date' not in df.columns:
             st.error("Error: 'date' column is missing in the retrieved data.")
@@ -128,7 +125,6 @@ def load_nepse_data():
         st.error(f"Error loading NEPSE data: {e}")
         return pd.DataFrame()
 
-
 # Initialize session state
 def initialize_session():
     """Initialize session state with data from Supabase database."""
@@ -145,7 +141,7 @@ def initialize_session():
             if not df.empty:
                 st.session_state.data[sector] = df
             else:
-                st.session_state.data[sector] = pd.DataFrame()  # Initialize empty
+                st.session_state.data[sector] = pd.DataFrame()
     
     if 'nepse_equity' not in st.session_state:
         st.session_state.nepse_equity = load_nepse_data()
@@ -156,19 +152,15 @@ def initialize_session():
 def update_data(selected_sector, input_data):
     """Update database with new sector data and auto-calculate NEPSE data."""
     try:
-        # Calculate total_stock before saving
         input_data["total_stock"] = (
             input_data["positive_stock"] +
             input_data["negative_stock"] +
             input_data["no_change"]
         )
         
-        # Save sector data
         if save_sector_data(selected_sector, input_data):
-            # Reload sector data
             st.session_state.data[selected_sector] = load_sector_data(selected_sector)
             
-            # Update NEPSE Equity data
             date = input_data["date"]
             all_sectors = list(st.session_state.data.keys())
             all_sectors_have_data = all(
@@ -244,7 +236,7 @@ def main():
     tab1, tab2, tab3 = st.tabs(["Sector Data Entry", "NEPSE Equity", "Analysis & Charts"])
     
     with tab1:
-        col1, col2 = st.columns([2, 1])
+        col1, col2 = st.columns(2)
         
         with col1:
             selected_sector = st.selectbox("Select Sector", sectors)
@@ -264,7 +256,6 @@ def main():
                 mime='text/csv',
             )
         
-        # Display data editor
         st.subheader(f"Data Editor - {selected_sector}")
         edited_df = st.data_editor(
             st.session_state.data[selected_sector],
