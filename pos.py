@@ -33,7 +33,7 @@ def save_sector_data(sector, data_dict):
             "no_change": float(data_dict["no_change"]),
             "positive_percentage": float(data_dict["positive_percentage"]),
             "label": get_label(data_dict["positive_percentage"]),
-            "total_stock": float(data_dict["positive_stock"] + data_dict["negative_stock"] + data_dict["no_change"])
+            "total_stock": float(data_dict["total_stock"])
         }).execute()
         return True
     except Exception as e:
@@ -152,12 +152,6 @@ def initialize_session():
 def update_data(selected_sector, input_data):
     """Update database with new sector data and auto-calculate NEPSE data."""
     try:
-        input_data["total_stock"] = (
-            input_data["positive_stock"] +
-            input_data["negative_stock"] +
-            input_data["no_change"]
-        )
-        
         if save_sector_data(selected_sector, input_data):
             st.session_state.data[selected_sector] = load_sector_data(selected_sector)
             
@@ -177,7 +171,7 @@ def update_data(selected_sector, input_data):
                     for sector in all_sectors
                 )
                 
-                save_nepse_data(date, total_positive)
+                save_nepse_data(date, total_positive, input_data["total_stock"])
                 st.session_state.nepse_equity = load_nepse_data()
             
             st.success("Data updated successfully! Please update NEPSE Total Stock in the NEPSE Equity tab.")
@@ -197,27 +191,21 @@ def get_user_input():
     
     with col2:
         no_change = st.number_input("No of No change", min_value=0.0, format="%.2f")
-        # Auto-calculate total_stock and disable the input field
-        total_stock = positive_stock + negative_stock + no_change
-        st.number_input(
-            "No of total stock (auto-calculated)",
-            value=total_stock,
-            disabled=True,  # 👈 Keep this disabled
-            key="total_stock"
-        )
+        total_stock = st.number_input("No of total stock", min_value=0.0, format="%.2f")
     
-    if (positive_stock + negative_stock + no_change) == 0:
+    if total_stock == 0:
         st.warning("Total stock cannot be zero. Please enter valid numbers.")
         return None
     
-    positive_percentage = (positive_stock / (positive_stock + negative_stock + no_change) * 100)
+    positive_percentage = (positive_stock / total_stock * 100)
     
     return {
         "date": date,
         "positive_stock": positive_stock,
         "negative_stock": negative_stock,
         "no_change": no_change,
-        "positive_percentage": positive_percentage
+        "positive_percentage": positive_percentage,
+        "total_stock": total_stock
     }
 
 # Placeholder functions for NEPSE Equity Management (as referenced in tab2)
