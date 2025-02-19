@@ -267,14 +267,30 @@ def display_data_editor(selected_sector):
         # Handle deletions
         deleted_rows = set(df.index) - set(edited_df.index)
         if deleted_rows:
+            deletion_successful = False
             for idx in deleted_rows:
                 row = df.loc[idx]
                 if pd.notna(row["Date"]):
-                    if delete_sector_data(selected_sector, row["Date"]):
-                        st.success(f"Data deleted for {selected_sector} on {row['Date']}")
+                    # Delete from Supabase
+                    date_str = row["Date"].strftime("%Y-%m-%d") if isinstance(row["Date"], (datetime, pd.Timestamp)) else row["Date"]
+                    response = supabase.table('sector_data')\
+                        .delete()\
+                        .eq('sector', selected_sector)\
+                        .eq('date', date_str)\
+                        .execute()
+                    
+                    if response.data:
+                        st.success(f"Data deleted for {selected_sector} on {date_str}")
+                        deletion_successful = True
                     else:
-                        st.error(f"Failed to delete data for {selected_sector} on {row['Date']}")
+                        st.error(f"Failed to delete data for {selected_sector} on {date_str}")
+            
+            if deletion_successful:
+                # Refresh data from Supabase
+                st.session_state.data[selected_sector] = load_sector_data(selected_sector)
+                st.rerun()  # Rerun to refresh the UI
         
+        # Handle updates
         if not edited_df.equals(df):
             # Calculate Positive % for rows with valid total stock
             mask = (edited_df["No of total stock"].notna()) & (edited_df["No of total stock"] > 0)
@@ -299,14 +315,13 @@ def display_data_editor(selected_sector):
                     }
                     save_sector_data(selected_sector, data_dict)
             
-            # Update session state
-            st.session_state.data[selected_sector] = edited_df
+            # Update session state and refresh data
+            st.session_state.data[selected_sector] = load_sector_data(selected_sector)
             st.success("Data updated successfully!")
             
     except Exception as e:
         st.error(f"Error in data editor: {e}")
         st.exception(e)
-
 def load_nepse_data():
     """Load NEPSE equity data from Supabase."""
     try:
