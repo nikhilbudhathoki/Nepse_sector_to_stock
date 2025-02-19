@@ -179,24 +179,31 @@ def update_data(selected_sector, input_data):
             # Reload sector data after saving
             st.session_state.data[selected_sector] = load_sector_data(selected_sector)
             
-            date = input_data["date"]
+            # Convert date to datetime if it isn't already
+            date = pd.to_datetime(input_data["date"])
             all_sectors = list(st.session_state.data.keys())
             
             # Check if all sectors have data for this date
-            all_sectors_have_data = all(
-                any(pd.to_datetime(date) == pd.to_datetime(row["date"]) 
-                for _, row in st.session_state.data[sector].iterrows())
-                for sector in all_sectors
-            )
+            all_sectors_have_data = True
+            for sector in all_sectors:
+                sector_df = st.session_state.data[sector]
+                if "Date" in sector_df.columns:  # Check if Date column exists
+                    sector_dates = pd.to_datetime(sector_df["Date"])
+                    if not any(sector_dates == date):
+                        all_sectors_have_data = False
+                        break
+                else:
+                    all_sectors_have_data = False
+                    break
             
             if all_sectors_have_data:
                 # Calculate total positive from all sectors
-                total_positive = sum(
-                    st.session_state.data[sector][
-                        pd.to_datetime(st.session_state.data[sector]["date"]) == pd.to_datetime(date)
-                    ]["positive_stock"].iloc[0]
-                    for sector in all_sectors
-                )
+                total_positive = 0
+                for sector in all_sectors:
+                    sector_df = st.session_state.data[sector]
+                    matching_row = sector_df[pd.to_datetime(sector_df["Date"]) == date]
+                    if not matching_row.empty:
+                        total_positive += matching_row["No of positive stock"].iloc[0]
                 
                 # Create/update NEPSE entry with None for Total Stock (to be filled by user)
                 save_nepse_data(date, total_positive, total_stock=None)
@@ -204,7 +211,13 @@ def update_data(selected_sector, input_data):
             
             st.success("Data updated successfully! Please update NEPSE Total Stock in the NEPSE Equity tab.")
     except Exception as e:
-        st.error(f"Error updating data: {e}")
+        st.error(f"Error updating data: {str(e)}")
+        st.exception(e)  # This will show the full traceback in development
+
+
+
+
+
 def display_data_editor(selected_sector):
     """Display unified data editor with automatic label updates."""
     if selected_sector not in st.session_state.data:
