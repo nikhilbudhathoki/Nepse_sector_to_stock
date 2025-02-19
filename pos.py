@@ -28,16 +28,31 @@ def get_label(value):
 # Initialize a directory to save data
 DATA_DIR = Path("saved_data")
 DATA_DIR.mkdir(exist_ok=True)
-
 import math
 
 def save_nepse_data(total_stock):
-    if total_stock is None or total_stock == '' or (isinstance(total_stock, float) and math.isnan(total_stock)):
-        total_stock = 0  # Assign a default value, like 0, or handle it accordingly
-    else:
-        total_stock = int(round(float(total_stock)))
+    try:
+        # Check if input is empty or invalid
+        if not total_stock or isinstance(total_stock, str) and total_stock.strip() == "":
+            raise ValueError("Total stock cannot be empty.")
 
-    # Now continue saving data to Supabase
+        # Convert the total_stock to float and round it
+        total_stock = float(total_stock)
+
+        # If the input value is NaN, handle it by setting a default value
+        if math.isnan(total_stock):
+            raise ValueError("Total stock cannot be NaN.")
+
+        # Round and convert it to an integer
+        total_stock = int(round(total_stock))
+
+    except ValueError as e:
+        # Handle invalid input
+        print(f"Error: {e}")
+        total_stock = 0  # Default value for invalid input
+
+    # Continue saving the data (with valid total_stock)
+    print(f"Total stock value: {total_stock}")
 
 
 def load_data():
