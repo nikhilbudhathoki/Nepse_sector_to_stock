@@ -159,10 +159,12 @@ def save_sector_data(sector, data_dict):
         st.error(f"Error saving sector data: {e}")
         return False
 
+
 def update_data(selected_sector, input_data):
     """Update database with new sector data and auto-calculate NEPSE data."""
     try:
         if save_sector_data(selected_sector, input_data):
+            # Reload sector data after saving
             st.session_state.data[selected_sector] = load_sector_data(selected_sector)
             
             date = input_data["date"]
@@ -170,7 +172,7 @@ def update_data(selected_sector, input_data):
             
             # Check if all sectors have data for this date
             all_sectors_have_data = all(
-                any(pd.to_datetime(date) == pd.to_datetime(row["Date"]) 
+                any(pd.to_datetime(date) == pd.to_datetime(row["date"]) 
                 for _, row in st.session_state.data[sector].iterrows())
                 for sector in all_sectors
             )
@@ -179,8 +181,8 @@ def update_data(selected_sector, input_data):
                 # Calculate total positive from all sectors
                 total_positive = sum(
                     st.session_state.data[sector][
-                        pd.to_datetime(st.session_state.data[sector]["Date"]) == pd.to_datetime(date)
-                    ]["No of positive stock"].iloc[0]
+                        pd.to_datetime(st.session_state.data[sector]["date"]) == pd.to_datetime(date)
+                    ]["positive_stock"].iloc[0]
                     for sector in all_sectors
                 )
                 
@@ -189,10 +191,8 @@ def update_data(selected_sector, input_data):
                 st.session_state.nepse_equity = load_nepse_data()
             
             st.success("Data updated successfully! Please update NEPSE Total Stock in the NEPSE Equity tab.")
-            
     except Exception as e:
         st.error(f"Error updating data: {e}")
-
 def display_data_editor(selected_sector):
     """Display unified data editor with automatic label updates."""
     st.subheader(f"Data Editor - {selected_sector}")
@@ -232,6 +232,26 @@ def display_data_editor(selected_sector):
             st.success("Data updated successfully!")
         else:
             st.error("Error: Edited data is missing required columns. Please check your input.")
+def load_nepse_data():
+    """Load NEPSE equity data from Supabase."""
+    try:
+        # Fetch data from Supabase
+        response = supabase.table('nepse_data').select("*").execute()
+        
+        # Convert the response to a DataFrame
+        if response.data:
+            df = pd.DataFrame(response.data)
+            df["date"] = pd.to_datetime(df["date"])  # Ensure the date column is in datetime format
+            return df
+        else:
+            return pd.DataFrame(columns=[
+                "date", "total_positive", "total_stock", "positive_change_percentage", "label"
+            ])
+    except Exception as e:
+        st.error(f"Error loading NEPSE data: {e}")
+        return pd.DataFrame(columns=[
+            "date", "total_positive", "total_stock", "positive_change_percentage", "label"
+        ])
 
 def display_nepse_equity():
     """Display NEPSE data editor with automatic updates."""
@@ -286,7 +306,28 @@ def display_nepse_equity():
             )
         st.session_state.nepse_equity = load_nepse_data()
         st.rerun()
-
+def load_sector_data(sector):
+    """Load data for a specific sector from Supabase."""
+    try:
+        # Fetch data from Supabase
+        response = supabase.table('sector_data').select("*").eq('sector', sector).execute()
+        
+        # Convert the response to a DataFrame
+        if response.data:
+            df = pd.DataFrame(response.data)
+            df["date"] = pd.to_datetime(df["date"])  # Ensure the date column is in datetime format
+            return df
+        else:
+            return pd.DataFrame(columns=[
+                "date", "positive_stock", "negative_stock", "no_change", 
+                "positive_percentage", "label", "total_stock"
+            ])
+    except Exception as e:
+        st.error(f"Error loading data for {sector}: {e}")
+        return pd.DataFrame(columns=[
+            "date", "positive_stock", "negative_stock", "no_change", 
+            "positive_percentage", "label", "total_stock"
+        ])
 
 def plot_nepse_data():
     """Plot NEPSE Equity data separately."""
