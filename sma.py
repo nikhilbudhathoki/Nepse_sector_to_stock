@@ -64,35 +64,46 @@ def create_connection():
     """Return the Supabase client (used as a connection)."""
     return supabase
 
-# Load data from Supabase
 @st.cache_data(ttl=0, show_spinner="Loading SMA data...")
 def load_sma_data():
-    """Load data from Supabase database."""
+    """Load data from Supabase database with improved error handling."""
     try:
         client = create_connection()
         response = client.table(TABLE_NAME).select("*").execute()
         
-        # Log the response from Supabase
+        # Debugging: Log the raw response
         st.write("Supabase response:", response)
-        
+
+        # Extract data
         data = response.data
-        if data is None:
+        if not data:
             st.warning("No data returned from Supabase.")
             return pd.DataFrame(columns=[DATE_COL, SECTOR_COL] + SMA_COLUMNS)
         
+        # Convert to DataFrame
         df = pd.DataFrame(data)
-        
-        # Check if the 'date' column exists
+
+        # Debugging: Check available columns
+        st.write("Available columns:", df.columns.tolist())
+
+        # Ensure 'date' column exists
         if DATE_COL not in df.columns:
-            st.error(f"Column '{DATE_COL}' not found in the data. Available columns: {df.columns.tolist()}")
+            st.error(f"Column '{DATE_COL}' not found in data. Available columns: {df.columns.tolist()}")
             return pd.DataFrame(columns=[DATE_COL, SECTOR_COL] + SMA_COLUMNS)
+
+        # Convert 'date' column to datetime format
+        df[DATE_COL] = pd.to_datetime(df[DATE_COL], errors="coerce")  # Converts errors to NaT
         
-        # Convert 'date' column to datetime
-        df[DATE_COL] = pd.to_datetime(df[DATE_COL])
+        # Check if conversion worked
+        if df[DATE_COL].isna().sum() > 0:
+            st.warning(f"Some dates could not be parsed. Check your Supabase data: {df[df[DATE_COL].isna()]}")
+        
         return df.sort_values(DATE_COL)
+    
     except Exception as e:
         st.error(f"Data loading error: {str(e)}")
         return pd.DataFrame(columns=[DATE_COL, SECTOR_COL] + SMA_COLUMNS)
+
 # Save data to Supabase
 def save_sma_data(edited_df):
     """Save data to Supabase database with better error handling and validation."""
