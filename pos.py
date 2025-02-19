@@ -441,6 +441,12 @@ def plot_nepse_data():
 def save_nepse_data(date, total_positive, total_stock=None):
     """Save NEPSE data to Supabase."""
     try:
+        # Convert total_positive to integer
+        total_positive = int(round(float(total_positive))) if total_positive is not None else None
+        
+        # Convert total_stock to integer if it exists
+        total_stock = int(round(float(total_stock))) if total_stock is not None else None
+        
         # Calculate positive change percentage if possible
         positive_change_percentage = None
         if total_stock is not None and total_stock > 0:
@@ -449,13 +455,13 @@ def save_nepse_data(date, total_positive, total_stock=None):
         # Prepare data for Supabase
         data = {
             "date": date.strftime("%Y-%m-%d") if isinstance(date, (datetime, pd.Timestamp)) else date,
-            "total_positive": float(total_positive) if total_positive is not None else None,
-            "total_stock": float(total_stock) if total_stock is not None else None,
+            "total_positive": total_positive,  # Now an integer
+            "total_stock": total_stock,  # Now an integer
             "positive_change_percentage": float(positive_change_percentage) if positive_change_percentage is not None else None,
             "label": get_label(positive_change_percentage)
         }
         
-        # Save to Supabase using correct table name
+        # Save to Supabase
         response = supabase.table('nepse_equity').upsert(data).execute()
         
         if not response.data:
@@ -465,9 +471,8 @@ def save_nepse_data(date, total_positive, total_stock=None):
         return True
     except Exception as e:
         st.error(f"Error saving NEPSE data: {e}")
+        st.exception(e)  # Show full traceback for debugging
         return False
-   
-               
 
 def main():
     st.title("Sector Data Editor")
