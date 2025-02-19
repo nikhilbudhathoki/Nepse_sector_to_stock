@@ -499,8 +499,12 @@ def save_nepse_data(date, total_positive, total_stock=None):
 def delete_sector_data(sector, date):
     """Delete sector data from Supabase for a specific date."""
     try:
-        # Convert date to string format if it's a datetime
-        date_str = date.strftime("%Y-%m-%d") if isinstance(date, (datetime, pd.Timestamp)) else date
+        # Ensure date is in the correct format (YYYY-MM-DD)
+        if isinstance(date, (datetime, pd.Timestamp)):
+            date_str = date.strftime("%Y-%m-%d")
+        else:
+            # If it's already a string, ensure it's in the correct format
+            date_str = pd.to_datetime(date).strftime("%Y-%m-%d")
         
         # Delete from Supabase
         response = supabase.table('sector_data')\
@@ -508,14 +512,18 @@ def delete_sector_data(sector, date):
             .eq('sector', sector)\
             .eq('date', date_str)\
             .execute()
-            
+        
+        # Check if any rows were affected
         if response.data:
+            st.success(f"Successfully deleted {sector} data for {date_str}")
             return True
-        return False
+        else:
+            st.error(f"No data found for {sector} on {date_str}")
+            return False
+            
     except Exception as e:
-        st.error(f"Error deleting sector data: {e}")
+        st.error(f"Error deleting {sector} data for {date_str}: {str(e)}")
         return False
-
 def delete_nepse_data(date):
     """Delete NEPSE data from Supabase for a specific date."""
     try:
