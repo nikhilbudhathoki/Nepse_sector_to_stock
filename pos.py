@@ -29,14 +29,16 @@ def get_label(value):
 DATA_DIR = Path("saved_data")
 DATA_DIR.mkdir(exist_ok=True)
 
-def save_data():
-    """Save all sector data and NEPSE data to CSV files."""
-    try:
-        for sector, df in st.session_state.data.items():
-            df.to_csv(DATA_DIR / f"{sector}_data.csv", index=False)
-        st.session_state.nepse_equity.to_csv(DATA_DIR / "nepse_equity.csv", index=False)
-    except Exception as e:
-        st.error(f"Error saving data: {e}")
+import math
+
+def save_nepse_data(total_stock):
+    if total_stock is None or total_stock == '' or (isinstance(total_stock, float) and math.isnan(total_stock)):
+        total_stock = 0  # Assign a default value, like 0, or handle it accordingly
+    else:
+        total_stock = int(round(float(total_stock)))
+
+    # Now continue saving data to Supabase
+
 
 def load_data():
     """Load saved data from CSV files."""
