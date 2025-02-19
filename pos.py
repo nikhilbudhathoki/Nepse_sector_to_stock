@@ -218,8 +218,9 @@ def update_data(selected_sector, input_data):
 
 
 
+
 def display_data_editor(selected_sector):
-    """Display unified data editor with automatic label updates."""
+    """Display unified data editor with automatic label updates and deletion."""
     if selected_sector not in st.session_state.data:
         st.session_state.data[selected_sector] = load_sector_data(selected_sector)
     
@@ -263,6 +264,17 @@ def display_data_editor(selected_sector):
             }
         )
         
+        # Handle deletions
+        deleted_rows = set(df.index) - set(edited_df.index)
+        if deleted_rows:
+            for idx in deleted_rows:
+                row = df.loc[idx]
+                if pd.notna(row["Date"]):
+                    if delete_sector_data(selected_sector, row["Date"]):
+                        st.success(f"Data deleted for {selected_sector} on {row['Date']}")
+                    else:
+                        st.error(f"Failed to delete data for {selected_sector} on {row['Date']}")
+        
         if not edited_df.equals(df):
             # Calculate Positive % for rows with valid total stock
             mask = (edited_df["No of total stock"].notna()) & (edited_df["No of total stock"] > 0)
@@ -294,7 +306,6 @@ def display_data_editor(selected_sector):
     except Exception as e:
         st.error(f"Error in data editor: {e}")
         st.exception(e)
-
 
 def load_nepse_data():
     """Load NEPSE equity data from Supabase."""
@@ -328,19 +339,20 @@ def load_nepse_data():
         ])
 
 
+
 def display_nepse_equity():
-    """Display NEPSE data editor with automatic updates."""
+    """Display NEPSE data editor with automatic updates and deletion."""
     st.subheader("NEPSE Equity Data")
     
     df = st.session_state.nepse_equity.copy()
     
-    # Ensure all required columns exist before sorting
+    # Ensure all required columns exist
     required_columns = ["Date", "Total Positive", "Total Stock", "Positive Change %", "Label"]
     for col in required_columns:
         if col not in df.columns:
             df[col] = None
     
-    # Only sort if there's data and Date column exists
+    # Sort only if there's data and Date column exists
     if not df.empty and "Date" in df.columns and df["Date"].notna().any():
         df = df.sort_values("Date", ascending=False)
     
@@ -365,7 +377,18 @@ def display_nepse_equity():
         }
     )
     
-    # Calculate values only for rows with valid data
+    # Handle deletions
+    deleted_rows = set(df.index) - set(edited_df.index)
+    if deleted_rows:
+        for idx in deleted_rows:
+            row = df.loc[idx]
+            if pd.notna(row["Date"]):
+                if delete_nepse_data(row["Date"]):
+                    st.success(f"NEPSE data deleted for {row['Date']}")
+                else:
+                    st.error(f"Failed to delete NEPSE data for {row['Date']}")
+    
+    # Calculate values
     mask = (edited_df["Total Stock"].notna()) & (edited_df["Total Stock"] > 0)
     edited_df.loc[mask, "Positive Change %"] = (
         edited_df.loc[mask, "Total Positive"] / edited_df.loc[mask, "Total Stock"]
@@ -377,9 +400,9 @@ def display_nepse_equity():
     edited_df.loc[~mask, "Label"] = "unknown"
     
     if not edited_df.equals(df):
-        # Save updated data to Supabase
+        # Save updated data
         for _, row in edited_df.iterrows():
-            if pd.notna(row["Date"]):  # Only save rows with valid dates
+            if pd.notna(row["Date"]):
                 save_nepse_data(
                     date=row["Date"],
                     total_positive=row["Total Positive"],
@@ -473,7 +496,44 @@ def save_nepse_data(date, total_positive, total_stock=None):
         st.error(f"Error saving NEPSE data: {e}")
         st.exception(e)  # Show full traceback for debugging
         return False
+def delete_sector_data(sector, date):
+    """Delete sector data from Supabase for a specific date."""
+    try:
+        # Convert date to string format if it's a datetime
+        date_str = date.strftime("%Y-%m-%d") if isinstance(date, (datetime, pd.Timestamp)) else date
+        
+        # Delete from Supabase
+        response = supabase.table('sector_data')\
+            .delete()\
+            .eq('sector', sector)\
+            .eq('date', date_str)\
+            .execute()
+            
+        if response.data:
+            return True
+        return False
+    except Exception as e:
+        st.error(f"Error deleting sector data: {e}")
+        return False
 
+def delete_nepse_data(date):
+    """Delete NEPSE data from Supabase for a specific date."""
+    try:
+        # Convert date to string format if it's a datetime
+        date_str = date.strftime("%Y-%m-%d") if isinstance(date, (datetime, pd.Timestamp)) else date
+        
+        # Delete from Supabase
+        response = supabase.table('nepse_equity')\
+            .delete()\
+            .eq('date', date_str)\
+            .execute()
+            
+        if response.data:
+            return True
+        return False
+    except Exception as e:
+        st.error(f"Error deleting NEPSE data: {e}")
+        return False
 def main():
     st.title("Sector Data Editor")
     sectors = initialize_session()
