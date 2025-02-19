@@ -89,7 +89,10 @@ def save_sma_data(edited_df):
     try:
         client = create_connection()
         sector = edited_df[SECTOR_COL].iloc[0]
-        date_str = edited_df[DATE_COL].iloc[0].strftime("%Y-%m-%d")
+        
+        # Ensure the DATE_COL column is in datetime format
+        if not pd.api.types.is_datetime64_any_dtype(edited_df[DATE_COL]):
+            edited_df[DATE_COL] = pd.to_datetime(edited_df[DATE_COL])
         
         # Convert dates to string format for Supabase
         edited_df = edited_df.copy()
@@ -120,7 +123,6 @@ def save_sma_data(edited_df):
     except Exception as e:
         st.error(f"Error saving data: {str(e)}")
         return False
-
 
 # Create SMA time series chart
 def create_sma_chart(data, selected_sector):
