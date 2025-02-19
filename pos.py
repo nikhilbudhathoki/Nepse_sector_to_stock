@@ -133,8 +133,8 @@ def save_sector_data(sector, data_dict):
         # Convert date to string format (YYYY-MM-DD)
         date_str = data_dict["date"].strftime("%Y-%m-%d")
         
-        # Save data to Supabase
-        response = supabase.table('pos').upsert({
+        # Prepare data for Supabase
+        data_to_save = {
             "sector": sector,
             "date": date_str,  # Use the formatted date string
             "positive_stock": float(data_dict["positive_stock"]),
@@ -143,8 +143,18 @@ def save_sector_data(sector, data_dict):
             "positive_percentage": float(data_dict["positive_percentage"]),
             "label": get_label(data_dict["positive_percentage"]),
             "total_stock": float(data_dict["total_stock"])
-        }).execute()
-        return True
+        }
+        
+        # Save data to Supabase
+        response = supabase.table('sector_data').upsert(data_to_save).execute()
+        
+        # Check if the operation was successful
+        if response.data:
+            st.success(f"Data saved successfully for {sector} on {date_str}!")
+            return True
+        else:
+            st.error("Failed to save data: No response data from Supabase.")
+            return False
     except Exception as e:
         st.error(f"Error saving sector data: {e}")
         return False
