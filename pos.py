@@ -193,45 +193,40 @@ def update_data(selected_sector, input_data):
             st.success("Data updated successfully! Please update NEPSE Total Stock in the NEPSE Equity tab.")
     except Exception as e:
         st.error(f"Error updating data: {e}")
-def display_data_editor(selected_sector):
-    """Display unified data editor with automatic label updates."""
-    st.subheader(f"Data Editor - {selected_sector}")
-    
-    df = st.session_state.data[selected_sector].copy()
-    df = df.sort_values("Date", ascending=False)
-    
-    edited_df = st.data_editor(
-        df,
-        num_rows="dynamic",
-        key=f"editor_{selected_sector}",
-        hide_index=True
-    )
-    
-    if not edited_df.equals(df):
-        # Ensure all required columns are present
-        required_columns = ["Date", "No of positive stock", "No of negative stock", 
-                            "No of total stock", "No of No change", "Positive %", "Label"]
-        if all(col in edited_df.columns for col in required_columns):
-            # Update labels
-            edited_df["Label"] = edited_df["Positive %"].apply(get_label)
-            
-            # Save each row to Supabase
-            for _, row in edited_df.iterrows():
-                data_dict = {
-                    "date": row["Date"],
-                    "positive_stock": row["No of positive stock"],
-                    "negative_stock": row["No of negative stock"],
-                    "no_change": row["No of No change"],
-                    "positive_percentage": row["Positive %"],
-                    "total_stock": row["No of total stock"]
-                }
-                save_sector_data(selected_sector, data_dict)
-            
-            # Update session state
-            st.session_state.data[selected_sector] = edited_df
-            st.success("Data updated successfully!")
+def load_sector_data(sector):
+    """Load data for a specific sector from Supabase."""
+    try:
+        # Fetch data from Supabase
+        response = supabase.table('sector_data').select("*").eq('sector', sector).execute()
+        
+        # Convert the response to a DataFrame
+        if response.data:
+            df = pd.DataFrame(response.data)
+            # Rename columns to match expected format
+            column_mapping = {
+                'date': 'Date',
+                'positive_stock': 'No of positive stock',
+                'negative_stock': 'No of negative stock',
+                'no_change': 'No of No change',
+                'total_stock': 'No of total stock',
+                'positive_percentage': 'Positive %',
+                'label': 'Label'
+            }
+            df = df.rename(columns=column_mapping)
+            df["Date"] = pd.to_datetime(df["Date"])
+            return df
         else:
-            st.error("Error: Edited data is missing required columns. Please check your input.")
+            # Create empty DataFrame with correct column names
+            return pd.DataFrame(columns=[
+                "Date", "No of positive stock", "No of negative stock",
+                "No of total stock", "No of No change", "Positive %", "Label"
+            ])
+    except Exception as e:
+        st.error(f"Error loading data for {sector}: {e}")
+        return pd.DataFrame(columns=[
+            "Date", "No of positive stock", "No of negative stock",
+            "No of total stock", "No of No change", "Positive %", "Label"
+        ])
 def load_nepse_data():
     """Load NEPSE equity data from Supabase."""
     try:
@@ -315,18 +310,30 @@ def load_sector_data(sector):
         # Convert the response to a DataFrame
         if response.data:
             df = pd.DataFrame(response.data)
-            df["date"] = pd.to_datetime(df["date"])  # Ensure the date column is in datetime format
+            # Rename columns to match expected format
+            column_mapping = {
+                'date': 'Date',
+                'positive_stock': 'No of positive stock',
+                'negative_stock': 'No of negative stock',
+                'no_change': 'No of No change',
+                'total_stock': 'No of total stock',
+                'positive_percentage': 'Positive %',
+                'label': 'Label'
+            }
+            df = df.rename(columns=column_mapping)
+            df["Date"] = pd.to_datetime(df["Date"])
             return df
         else:
+            # Create empty DataFrame with correct column names
             return pd.DataFrame(columns=[
-                "date", "positive_stock", "negative_stock", "no_change", 
-                "positive_percentage", "label", "total_stock"
+                "Date", "No of positive stock", "No of negative stock",
+                "No of total stock", "No of No change", "Positive %", "Label"
             ])
     except Exception as e:
         st.error(f"Error loading data for {sector}: {e}")
         return pd.DataFrame(columns=[
-            "date", "positive_stock", "negative_stock", "no_change", 
-            "positive_percentage", "label", "total_stock"
+            "Date", "No of positive stock", "No of negative stock",
+            "No of total stock", "No of No change", "Positive %", "Label"
         ])
 
 def plot_nepse_data():
