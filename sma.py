@@ -199,7 +199,60 @@ def delete_sma_data(sector, date):
     except Exception as e:
         st.error(f"Error deleting data: {str(e)}")
         return False
-
+def display_sma_editor(sector_data, selected_sector):
+    """Display enhanced SMA data editor with deletion and update capabilities."""
+    try:
+        edited_df = st.data_editor(
+            sector_data,
+            num_rows="dynamic",
+            column_config={
+                DATE_COL: st.column_config.DateColumn(
+                    "Date",
+                    format="YYYY-MM-DD",
+                    required=True
+                ),
+                **{
+                    sma: st.column_config.NumberColumn(
+                        sma.replace('_', ' '),
+                        help=f"{sma.split('_')[0]} days simple moving average",
+                        min_value=0.0,
+                        format="%.2f",
+                        required=True
+                    ) for sma in SMA_COLUMNS
+                }
+            },
+            height=600,
+            key='sma_editor',
+            hide_index=True
+        )
+        
+        # Handle deletions
+        deleted_rows = set(sector_data.index) - set(edited_df.index)
+        if deleted_rows:
+            deletion_successful = False
+            for idx in deleted_rows:
+                row = sector_data.loc[idx]
+                if pd.notna(row[DATE_COL]):
+                    if delete_sma_data(selected_sector, row[DATE_COL]):
+                        deletion_successful = True
+            
+            if deletion_successful:
+                st.cache_data.clear()
+                st.rerun()
+        
+        # Handle updates
+        if not edited_df.equals(sector_data):
+            edited_df[SECTOR_COL] = selected_sector
+            if save_sma_data(edited_df):
+                st.cache_data.clear()
+                st.rerun()
+        
+        return edited_df
+        
+    except Exception as e:
+        st.error(f"Error in data editor: {str(e)}")
+        st.exception(e)
+        return sector_data
 # Main app function
 def main():
     st.title("📈 NEPSE SMA Analysis")
