@@ -71,15 +71,16 @@ def load_sma_data():
     try:
         client = create_connection()
         response = client.table(TABLE_NAME).select("*").execute()
+        
+        # Log the response from Supabase
+        st.write("Supabase response:", response)
+        
         data = response.data
-        
-        # Log the data returned from Supabase
-        st.write("Data loaded from Supabase:", data)
-        
         if data is None:
-            df = pd.DataFrame(columns=[DATE_COL, SECTOR_COL] + SMA_COLUMNS)
-        else:
-            df = pd.DataFrame(data)
+            st.warning("No data returned from Supabase.")
+            return pd.DataFrame(columns=[DATE_COL, SECTOR_COL] + SMA_COLUMNS)
+        
+        df = pd.DataFrame(data)
         
         # Check if the 'date' column exists
         if DATE_COL not in df.columns:
@@ -92,7 +93,6 @@ def load_sma_data():
     except Exception as e:
         st.error(f"Data loading error: {str(e)}")
         return pd.DataFrame(columns=[DATE_COL, SECTOR_COL] + SMA_COLUMNS)
-
 # Save data to Supabase
 def save_sma_data(edited_df):
     """Save data to Supabase database with better error handling and validation."""
