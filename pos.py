@@ -1,10 +1,15 @@
-
 import pandas as pd
 import plotly.express as px
 from pathlib import Path
 from datetime import datetime
 import streamlit as st
 from supabase import create_client
+import os
+
+# Initialize Supabase client
+SUPABASE_URL = os.getenv('SUPABASE_URL')  # Replace with your Supabase URL
+SUPABASE_KEY = os.getenv('SUPABASE_KEY')  # Replace with your Supabase API key
+supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 def get_label(value):
     """Determine label based on threshold values."""
@@ -286,6 +291,8 @@ def plot_nepse_data():
             st.plotly_chart(fig, use_container_width=True)
     except Exception as e:
         st.error(f"Error plotting NEPSE data: {e}")
+   
+               
 
 def main():
     st.title("Sector Data Editor")
