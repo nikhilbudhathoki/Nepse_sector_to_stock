@@ -7,8 +7,11 @@ from supabase import create_client
 import os
 
 # Initialize Supabase client
-SUPABASE_URL = os.getenv('SUPABASE_URL')  # Replace with your Supabase URL
-SUPABASE_KEY = os.getenv('SUPABASE_KEY')  # Replace with your Supabase API key
+SUPABASE_URL = "https://zjxwjeqgkanjcsrgmfri.supabase.co"
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpqeHdqZXFna2FuamNzcmdtZnJpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Mzk2MDk0NTcsImV4cCI6MjA1NTE4NTQ1N30.z_L9UjokkUpBZoqAQj1OOR23MvvDWG1erHDNcr4dY6s"
+
+
+# Initialize Supabase client
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 def get_label(value):
