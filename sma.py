@@ -85,21 +85,42 @@ def load_sma_data():
 
 # Save data to Supabase
 def save_sma_data(edited_df):
-    """Save data to Supabase database with transaction."""
+    """Save data to Supabase database with better error handling and validation."""
     try:
         client = create_connection()
-        # Delete existing sector data
         sector = edited_df[SECTOR_COL].iloc[0]
-        client.table(TABLE_NAME).delete().eq(SECTOR_COL, sector).execute()
+        date_str = edited_df[DATE_COL].iloc[0].strftime("%Y-%m-%d")
         
-        # Insert new data (convert DataFrame to list of dicts)
+        # Convert dates to string format for Supabase
+        edited_df = edited_df.copy()
+        edited_df[DATE_COL] = edited_df[DATE_COL].dt.strftime("%Y-%m-%d")
+        
+        # Prepare data for insert
         data = edited_df.to_dict(orient="records")
-        client.table(TABLE_NAME).insert(data).execute()
-        st.success("Data saved successfully!")
-        return True
+        
+        # Begin transaction-like operation
+        # First delete existing records
+        delete_response = client.table(TABLE_NAME)\
+            .delete()\
+            .eq(SECTOR_COL, sector)\
+            .execute()
+        
+        # Then insert new records
+        insert_response = client.table(TABLE_NAME)\
+            .insert(data)\
+            .execute()
+        
+        if insert_response.data:
+            st.success(f"Successfully updated {sector} data!")
+            return True
+        else:
+            st.error("Failed to save data: No response from database")
+            return False
+            
     except Exception as e:
-        st.error(f"Save error: {str(e)}")
+        st.error(f"Error saving data: {str(e)}")
         return False
+
 
 # Create SMA time series chart
 def create_sma_chart(data, selected_sector):
@@ -150,6 +171,35 @@ def create_comparison_charts(data):
             charts.append(None)
     return charts
 
+def delete_sma_data(sector, date):
+    """Delete specific SMA data entry."""
+    try:
+        client = create_connection()
+        
+        # Ensure date is in correct format
+        if isinstance(date, (datetime, pd.Timestamp)):
+            date_str = date.strftime("%Y-%m-%d")
+        else:
+            date_str = pd.to_datetime(date).strftime("%Y-%m-%d")
+        
+        # Delete specific record
+        response = client.table(TABLE_NAME)\
+            .delete()\
+            .eq(SECTOR_COL, sector)\
+            .eq(DATE_COL, date_str)\
+            .execute()
+        
+        if response.data:
+            st.success(f"Successfully deleted {sector} data for {date_str}")
+            return True
+        else:
+            st.error(f"No data found for {sector} on {date_str}")
+            return False
+            
+    except Exception as e:
+        st.error(f"Error deleting data: {str(e)}")
+        return False
+
 # Main app function
 def main():
     st.title("📈 NEPSE SMA Analysis")
@@ -166,14 +216,13 @@ def main():
     )
     
     # Filter data for the selected sector
-    sector_data = sma_data[sma_data[SECTOR_COL] == selected_sector]
+    sector_data = sma_data[sma_data[SECTOR_COL] == selected_sector].copy()
     
     # Main layout
     col1, col2 = st.columns([1, 3])
     
     with col1:
         st.subheader("SMA Chart")
-        # Display chart for the selected sector
         chart = create_sma_chart(sma_data, selected_sector)
         if chart:
             st.plotly_chart(chart, use_container_width=True)
@@ -184,86 +233,190 @@ def main():
         st.subheader("SMA Data Editor")
         st.markdown(f"**Editing data for sector: {selected_sector}**")
         
-        # Data editor for the selected sector
         with st.expander("Edit SMA Values", expanded=True):
-            edited_sector_data = st.data_editor(
-                sector_data,
-                num_rows="dynamic",
-                column_config={
-                    DATE_COL: st.column_config.DateColumn(
-                        "Date",
-                        format="YYYY-MM-DD",
-                        required=True
-                    ),
-                    **{
-                        sma: st.column_config.NumberColumn(
-                            sma.replace('_', ' '),
-                            help=f"{sma.split('_')[0]} days simple moving average",
-                            min_value=0.0,
-                            format="%.2f",
-                            required=True
-                        ) for sma in SMA_COLUMNS
-                    }
-                },
-                height=600,
-                key='sma_editor'
-            )
+            # Use the new display_sma_editor function
+            edited_sector_data = display_sma_editor(sector_data, selected_sector)
             
-            # Add the sector column back to the edited data
-            edited_sector_data[SECTOR_COL] = selected_sector
-            
-            if st.button("💾 Save SMA Data", type="primary"):
-                # Merge edited sector data with the rest of the data
-                other_sectors_data = sma_data[sma_data[SECTOR_COL] != selected_sector]
-                updated_data = pd.concat([other_sectors_data, edited_sector_data], ignore_index=True)
-                
-                if save_sma_data(edited_sector_data):  # Only save the edited sector
-                    st.success("SMA data saved successfully!")
-                    st.cache_data.clear()
-                    st.rerun()
+            # Download button for sector data
+            if not sector_data.empty:
+                st.download_button(
+                    label="📥 Download Sector Data",
+                    data=sector_data.to_csv(index=False).encode('utf-8'),
+                    file_name=f"{selected_sector}_sma_data.csv",
+                    mime='text/csv',
+                )
     
-    # Comparison Section
+      # Comparison Section
     st.markdown("---")
     st.subheader("📊 Sector Comparison View")
     
-    # Date range selector for comparison
+    # Enhanced date range selector with validation
     min_date = sma_data[DATE_COL].min() if not sma_data.empty else datetime.today()
     max_date = sma_data[DATE_COL].max() if not sma_data.empty else datetime.today()
     
-    comparison_dates = st.date_input(
-        "Select Date Range for Comparison",
-        value=[min_date, max_date],
-        min_value=min_date,
-        max_value=max_date
-    )
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        comparison_dates = st.date_input(
+            "Select Date Range for Comparison",
+            value=[min_date, max_date],
+            min_value=min_date,
+            max_value=max_date
+        )
     
-    # Filter data for date range
-    if len(comparison_dates) == 2:
-        start_date, end_date = comparison_dates
-        filtered_data = sma_data[
-            (sma_data[DATE_COL] >= pd.to_datetime(start_date)) &
-            (sma_data[DATE_COL] <= pd.to_datetime(end_date))
-        ]
-    else:
+    with col2:
+        # Add download button for complete dataset
+        if not sma_data.empty:
+            st.download_button(
+                label="📥 Download Complete Dataset",
+                data=sma_data.to_csv(index=False).encode('utf-8'),
+                file_name="complete_sma_data.csv",
+                mime='text/csv',
+                help="Download the complete SMA data for all sectors"
+            )
+
+    # Improved data filtering with error handling
+    try:
+        if len(comparison_dates) == 2:
+            start_date, end_date = comparison_dates
+            filtered_data = sma_data[
+                (sma_data[DATE_COL] >= pd.to_datetime(start_date)) &
+                (sma_data[DATE_COL] <= pd.to_datetime(end_date))
+            ]
+            
+            if filtered_data.empty:
+                st.warning(f"No data available for the selected date range: {start_date} to {end_date}")
+                filtered_data = sma_data
+        else:
+            filtered_data = sma_data
+            
+    except Exception as e:
+        st.error(f"Error filtering data: {str(e)}")
         filtered_data = sma_data
-    
-    # Create comparison charts
+
+    # Enhanced comparison charts
     st.write("### SMA Trends Across All Sectors")
-    comparison_charts = create_comparison_charts(filtered_data)
     
-    # Display in a grid (3 columns)
+    # Add chart controls
+    chart_col1, chart_col2 = st.columns([2, 1])
+    with chart_col1:
+        selected_smas = st.multiselect(
+            "Select SMAs to Display",
+            SMA_COLUMNS,
+            default=SMA_COLUMNS,
+            help="Choose which SMA periods to show in the charts"
+        )
+    
+    with chart_col2:
+        chart_height = st.slider(
+            "Chart Height",
+            min_value=200,
+            max_value=400,
+            value=300,
+            step=50,
+            help="Adjust the height of individual charts"
+        )
+
+    # Create improved comparison charts
+    def create_enhanced_comparison_charts(data, selected_smas, height):
+        """Create enhanced SMA comparison charts with selected periods."""
+        charts = []
+        for sector in ALLOWED_SECTORS:
+            sector_df = data[data[SECTOR_COL] == sector]
+            if not sector_df.empty:
+                fig = px.line(
+                    sector_df,
+                    x=DATE_COL,
+                    y=selected_smas,
+                    title=f"{sector} SMA Trends",
+                    labels={'value': 'SMA Value', DATE_COL: 'Date'},
+                    markers=True
+                )
+                fig.update_layout(
+                    height=height,
+                    title_x=0.5,
+                    legend_title='SMA Periods',
+                    margin=dict(l=20, r=20, t=40, b=20),
+                    showlegend=True,
+                    legend=dict(
+                        orientation="h",
+                        yanchor="bottom",
+                        y=1.02,
+                        xanchor="right",
+                        x=1
+                    ),
+                    hovermode='x unified'
+                )
+                charts.append((sector, fig))
+            else:
+                charts.append((sector, None))
+        return charts
+
+    # Display enhanced comparison charts
+    comparison_charts = create_enhanced_comparison_charts(filtered_data, selected_smas, chart_height)
+    
+    # Create grid layout
     cols = st.columns(3)
     col_idx = 0
     
-    for sector, chart in zip(ALLOWED_SECTORS, comparison_charts):
+    for sector, chart in comparison_charts:
         with cols[col_idx]:
             if chart:
                 st.plotly_chart(chart, use_container_width=True)
+                
+                # Add sector statistics
+                sector_df = filtered_data[filtered_data[SECTOR_COL] == sector]
+                if not sector_df.empty:
+                    with st.expander(f"{sector} Statistics"):
+                        latest_date = sector_df[DATE_COL].max()
+                        latest_data = sector_df[sector_df[DATE_COL] == latest_date]
+                        
+                        st.write("Latest Values:")
+                        for sma in selected_smas:
+                            st.write(f"{sma.replace('_', ' ')}: {latest_data[sma].iloc[0]:.2f}")
             else:
-                st.warning(f"No data for {sector}")
-            # Add sector label
-            st.markdown(f"<center><strong>{sector}</strong></center>", unsafe_allow_html=True)
+                st.warning(f"No data available for {sector}")
+            
+            # Add sector label with styling
+            st.markdown(
+                f"""
+                <div style='text-align: center; padding: 10px; 
+                background-color: #f0f2f6; border-radius: 5px;'>
+                    <strong>{sector}</strong>
+                </div>
+                """, 
+                unsafe_allow_html=True
+            )
+            
         col_idx = (col_idx + 1) % 3
+
+    # Add data insights section
+    st.markdown("---")
+    st.subheader("📈 Data Insights")
+    
+    # Calculate and display insights
+    if not filtered_data.empty:
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.write("### Latest SMA Trends")
+            latest_date = filtered_data[DATE_COL].max()
+            latest_data = filtered_data[filtered_data[DATE_COL] == latest_date]
+            
+            for sector in ALLOWED_SECTORS:
+                sector_latest = latest_data[latest_data[SECTOR_COL] == sector]
+                if not sector_latest.empty:
+                    with st.expander(f"{sector} Latest Trends"):
+                        sma_values = sector_latest[selected_smas].iloc[0]
+                        for sma, value in sma_values.items():
+                            st.write(f"{sma.replace('_', ' ')}: {value:.2f}")
+        
+        with col2:
+            st.write("### Data Coverage")
+            for sector in ALLOWED_SECTORS:
+                sector_data = filtered_data[filtered_data[SECTOR_COL] == sector]
+                if not sector_data.empty:
+                    date_range = f"{sector_data[DATE_COL].min().strftime('%Y-%m-%d')} to {sector_data[DATE_COL].max().strftime('%Y-%m-%d')}"
+                    st.write(f"{sector}: {date_range}")
 
 if __name__ == "__main__":
     main()
