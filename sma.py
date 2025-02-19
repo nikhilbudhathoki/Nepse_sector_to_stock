@@ -72,12 +72,22 @@ def load_sma_data():
         client = create_connection()
         response = client.table(TABLE_NAME).select("*").execute()
         data = response.data
+        
+        # Log the data returned from Supabase
+        st.write("Data loaded from Supabase:", data)
+        
         if data is None:
             df = pd.DataFrame(columns=[DATE_COL, SECTOR_COL] + SMA_COLUMNS)
         else:
             df = pd.DataFrame(data)
-        if not df.empty and DATE_COL in df.columns:
-            df[DATE_COL] = pd.to_datetime(df[DATE_COL])
+        
+        # Check if the 'date' column exists
+        if DATE_COL not in df.columns:
+            st.error(f"Column '{DATE_COL}' not found in the data. Available columns: {df.columns.tolist()}")
+            return pd.DataFrame(columns=[DATE_COL, SECTOR_COL] + SMA_COLUMNS)
+        
+        # Convert 'date' column to datetime
+        df[DATE_COL] = pd.to_datetime(df[DATE_COL])
         return df.sort_values(DATE_COL)
     except Exception as e:
         st.error(f"Data loading error: {str(e)}")
