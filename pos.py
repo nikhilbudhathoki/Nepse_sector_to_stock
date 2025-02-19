@@ -286,39 +286,53 @@ def display_data_editor(selected_sector):
 def load_nepse_data():
     """Load NEPSE equity data from Supabase."""
     try:
-        # Fetch data from Supabase
-        response = supabase.table('nepse_data').select("*").execute()
+        # Fetch data from Supabase - using correct table name 'nepse_equity'
+        response = supabase.table('nepse_equity').select("*").execute()
         
         # Convert the response to a DataFrame
         if response.data:
             df = pd.DataFrame(response.data)
-            df["date"] = pd.to_datetime(df["date"])  # Ensure the date column is in datetime format
+            # Ensure column names match what's expected in the display function
+            column_mapping = {
+                'date': 'Date',
+                'total_positive': 'Total Positive',
+                'total_stock': 'Total Stock',
+                'positive_change_percentage': 'Positive Change %',
+                'label': 'Label'
+            }
+            df = df.rename(columns=column_mapping)
+            df["Date"] = pd.to_datetime(df["Date"])
             return df
         else:
+            # Create empty DataFrame with correct column names
             return pd.DataFrame(columns=[
-                "date", "total_positive", "total_stock", "positive_change_percentage", "label"
+                "Date", "Total Positive", "Total Stock", "Positive Change %", "Label"
             ])
     except Exception as e:
         st.error(f"Error loading NEPSE data: {e}")
         return pd.DataFrame(columns=[
-            "date", "total_positive", "total_stock", "positive_change_percentage", "label"
+            "Date", "Total Positive", "Total Stock", "Positive Change %", "Label"
         ])
+
 
 def display_nepse_equity():
     """Display NEPSE data editor with automatic updates."""
     st.subheader("NEPSE Equity Data")
     
     df = st.session_state.nepse_equity.copy()
-    df = df.sort_values("Date", ascending=False)
     
-    # Ensure column order and existence
+    # Ensure all required columns exist before sorting
     required_columns = ["Date", "Total Positive", "Total Stock", "Positive Change %", "Label"]
     for col in required_columns:
         if col not in df.columns:
             df[col] = None
     
+    # Only sort if there's data and Date column exists
+    if not df.empty and "Date" in df.columns and df["Date"].notna().any():
+        df = df.sort_values("Date", ascending=False)
+    
     edited_df = st.data_editor(
-        df[required_columns],
+        df,
         num_rows="dynamic",
         key="editor_nepse",
         hide_index=True,
@@ -338,10 +352,12 @@ def display_nepse_equity():
         }
     )
     
-    # Calculate values
+    # Calculate values only for rows with valid data
     mask = (edited_df["Total Stock"].notna()) & (edited_df["Total Stock"] > 0)
-    edited_df["Positive Change %"] = (edited_df["Total Positive"] / edited_df["Total Stock"]) * 100
-    edited_df["Label"] = edited_df["Positive Change %"].apply(get_label)
+    edited_df.loc[mask, "Positive Change %"] = (
+        edited_df.loc[mask, "Total Positive"] / edited_df.loc[mask, "Total Stock"]
+    ) * 100
+    edited_df.loc[mask, "Label"] = edited_df.loc[mask, "Positive Change %"].apply(get_label)
     
     # Handle invalid/missing values
     edited_df.loc[~mask, "Positive Change %"] = None
@@ -350,11 +366,12 @@ def display_nepse_equity():
     if not edited_df.equals(df):
         # Save updated data to Supabase
         for _, row in edited_df.iterrows():
-            save_nepse_data(
-                date=row["Date"],
-                total_positive=row["Total Positive"],
-                total_stock=row["Total Stock"]
-            )
+            if pd.notna(row["Date"]):  # Only save rows with valid dates
+                save_nepse_data(
+                    date=row["Date"],
+                    total_positive=row["Total Positive"],
+                    total_stock=row["Total Stock"]
+                )
         st.session_state.nepse_equity = load_nepse_data()
         st.rerun()
 def load_sector_data(sector):
@@ -408,6 +425,34 @@ def plot_nepse_data():
             st.plotly_chart(fig, use_container_width=True)
     except Exception as e:
         st.error(f"Error plotting NEPSE data: {e}")
+def save_nepse_data(date, total_positive, total_stock=None):
+    """Save NEPSE data to Supabase."""
+    try:
+        # Calculate positive change percentage if possible
+        positive_change_percentage = None
+        if total_stock is not None and total_stock > 0:
+            positive_change_percentage = (total_positive / total_stock) * 100
+        
+        # Prepare data for Supabase
+        data = {
+            "date": date.strftime("%Y-%m-%d") if isinstance(date, (datetime, pd.Timestamp)) else date,
+            "total_positive": float(total_positive) if total_positive is not None else None,
+            "total_stock": float(total_stock) if total_stock is not None else None,
+            "positive_change_percentage": float(positive_change_percentage) if positive_change_percentage is not None else None,
+            "label": get_label(positive_change_percentage)
+        }
+        
+        # Save to Supabase using correct table name
+        response = supabase.table('nepse_equity').upsert(data).execute()
+        
+        if not response.data:
+            st.error("Failed to save NEPSE data")
+            return False
+        
+        return True
+    except Exception as e:
+        st.error(f"Error saving NEPSE data: {e}")
+        return False
    
                
 
