@@ -17,8 +17,9 @@ class SupabaseManager:
     def __init__(self):
         # Initialize Supabase client
         self.supabase = create_client(
-            st.secrets["supabase_url"],
-            st.secrets["supabase_key"]
+           "https://zjxwjeqgkanjcsrgmfri.supabase.co",
+"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpqeHdqZXFna2FuamNzcmdtZnJpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Mzk2MDk0NTcsImV4cCI6MjA1NTE4NTQ1N30.z_L9UjokkUpBZoqAQj1OOR23MvvDWG1erHDNcr4dY6s"
+
         )
         self.create_tables()
 
