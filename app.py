@@ -5,7 +5,6 @@ from datetime import datetime
 import streamlit as st
 from supabase import create_client
 import os
-import math
 
 # Initialize Supabase client
 SUPABASE_URL = "https://zjxwjeqgkanjcsrgmfri.supabase.co"
@@ -13,10 +12,6 @@ SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
 
 # Initialize Supabase client
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-
-# Initialize a directory to save data
-DATA_DIR = Path("saved_data")
-DATA_DIR.mkdir(exist_ok=True)
 
 def get_label(value):
     """Determine label based on threshold values."""
@@ -28,6 +23,11 @@ def get_label(value):
         return "mid"
     else:
         return "weak"
+
+# Initialize a directory to save data
+DATA_DIR = Path("saved_data")
+DATA_DIR.mkdir(exist_ok=True)
+import math
 
 def save_nepse_data(total_stock):
     try:
@@ -142,7 +142,7 @@ def get_user_input():
     positive_percentage = (positive_stock / total_stock * 100) if total_stock > 0 else 0
     
     return {
-        "date": date,
+        "date": date,  # Ensure this key is included
         "positive_stock": positive_stock,
         "negative_stock": negative_stock,
         "total_stock": total_stock,
@@ -153,15 +153,18 @@ def get_user_input():
 def save_sector_data(sector, data_dict):
     """Save sector data to Supabase database."""
     try:
+        # Ensure the date is in the correct format
         if "date" not in data_dict:
             st.error("Error: 'date' key is missing in the input data.")
             return False
         
+        # Convert date to string format (YYYY-MM-DD)
         date_str = data_dict["date"].strftime("%Y-%m-%d")
         
+        # Prepare data for Supabase
         data_to_save = {
             "sector": sector,
-            "date": date_str,
+            "date": date_str,  # Use the formatted date string
             "positive_stock": float(data_dict["positive_stock"]),
             "negative_stock": float(data_dict["negative_stock"]),
             "no_change": float(data_dict["no_change"]),
@@ -170,8 +173,10 @@ def save_sector_data(sector, data_dict):
             "total_stock": float(data_dict["total_stock"])
         }
         
+        # Save data to Supabase
         response = supabase.table('sector_data').upsert(data_to_save).execute()
         
+        # Check if the operation was successful
         if response.data:
             st.success(f"Data saved successfully for {sector} on {date_str}!")
             return True
@@ -186,15 +191,18 @@ def update_data(selected_sector, input_data):
     """Update database with new sector data and auto-calculate NEPSE data."""
     try:
         if save_sector_data(selected_sector, input_data):
+            # Reload sector data after saving
             st.session_state.data[selected_sector] = load_sector_data(selected_sector)
             
+            # Convert date to datetime if it isn't already
             date = pd.to_datetime(input_data["date"])
             all_sectors = list(st.session_state.data.keys())
             
+            # Check if all sectors have data for this date
             all_sectors_have_data = True
             for sector in all_sectors:
                 sector_df = st.session_state.data[sector]
-                if "Date" in sector_df.columns:
+                if "Date" in sector_df.columns:  # Check if Date column exists
                     sector_dates = pd.to_datetime(sector_df["Date"])
                     if not any(sector_dates == date):
                         all_sectors_have_data = False
@@ -204,6 +212,7 @@ def update_data(selected_sector, input_data):
                     break
             
             if all_sectors_have_data:
+                # Calculate total positive from all sectors
                 total_positive = 0
                 for sector in all_sectors:
                     sector_df = st.session_state.data[sector]
@@ -211,13 +220,14 @@ def update_data(selected_sector, input_data):
                     if not matching_row.empty:
                         total_positive += matching_row["No of positive stock"].iloc[0]
                 
+                # Create/update NEPSE entry with None for Total Stock (to be filled by user)
                 save_nepse_data(date, total_positive, total_stock=None)
                 st.session_state.nepse_equity = load_nepse_data()
             
             st.success("Data updated successfully! Please update NEPSE Total Stock in the NEPSE Equity tab.")
     except Exception as e:
         st.error(f"Error updating data: {str(e)}")
-        st.exception(e)
+        st.exception(e)  # This will show the full traceback in development
 
 def display_data_editor(selected_sector):
     """Display unified data editor with automatic label updates and deletion."""
@@ -228,18 +238,22 @@ def display_data_editor(selected_sector):
     
     df = st.session_state.data[selected_sector].copy()
     
+    # Ensure all required columns exist with correct names
     required_columns = [
         "Date", "No of positive stock", "No of negative stock",
         "No of total stock", "No of No change", "Positive %", "Label"
     ]
     
+    # Initialize empty DataFrame if df is None or empty
     if df is None or df.empty:
         df = pd.DataFrame(columns=required_columns)
     
+    # Ensure all required columns exist
     for col in required_columns:
         if col not in df.columns:
             df[col] = None
     
+    # Sort only if there's data and Date column exists
     if not df.empty and "Date" in df.columns and df["Date"].notna().any():
         df = df.sort_values("Date", ascending=False)
     
@@ -260,12 +274,14 @@ def display_data_editor(selected_sector):
             }
         )
         
+        # Handle deletions
         deleted_rows = set(df.index) - set(edited_df.index)
         if deleted_rows:
             deletion_successful = False
             for idx in deleted_rows:
                 row = df.loc[idx]
                 if pd.notna(row["Date"]):
+                    # Delete from Supabase
                     date_str = row["Date"].strftime("%Y-%m-%d") if isinstance(row["Date"], (datetime, pd.Timestamp)) else row["Date"]
                     response = supabase.table('sector_data')\
                         .delete()\
@@ -280,18 +296,23 @@ def display_data_editor(selected_sector):
                         st.error(f"Failed to delete data for {selected_sector} on {date_str}")
             
             if deletion_successful:
+                # Refresh data from Supabase
                 st.session_state.data[selected_sector] = load_sector_data(selected_sector)
-                st.rerun()
+                st.rerun()  # Rerun to refresh the UI
         
+        # Handle updates
         if not edited_df.equals(df):
+            # Calculate Positive % for rows with valid total stock
             mask = (edited_df["No of total stock"].notna()) & (edited_df["No of total stock"] > 0)
             edited_df.loc[mask, "Positive %"] = (
                 edited_df.loc[mask, "No of positive stock"] / 
                 edited_df.loc[mask, "No of total stock"] * 100
             )
             
+            # Update labels
             edited_df["Label"] = edited_df["Positive %"].apply(get_label)
             
+            # Save each row to Supabase
             for _, row in edited_df.iterrows():
                 if pd.notna(row["Date"]) and pd.notna(row["No of total stock"]):
                     data_dict = {
@@ -304,6 +325,7 @@ def display_data_editor(selected_sector):
                     }
                     save_sector_data(selected_sector, data_dict)
             
+            # Update session state and refresh data
             st.session_state.data[selected_sector] = load_sector_data(selected_sector)
             st.success("Data updated successfully!")
             
@@ -314,10 +336,13 @@ def display_data_editor(selected_sector):
 def load_nepse_data():
     """Load NEPSE equity data from Supabase."""
     try:
+        # Fetch data from Supabase - using correct table name 'nepse_equity'
         response = supabase.table('nepse_equity').select("*").execute()
         
+        # Convert the response to a DataFrame
         if response.data:
             df = pd.DataFrame(response.data)
+            # Ensure column names match what's expected in the display function
             column_mapping = {
                 'date': 'Date',
                 'total_positive': 'Total Positive',
@@ -329,6 +354,7 @@ def load_nepse_data():
             df["Date"] = pd.to_datetime(df["Date"])
             return df
         else:
+            # Create empty DataFrame with correct column names
             return pd.DataFrame(columns=[
                 "Date", "Total Positive", "Total Stock", "Positive Change %", "Label"
             ])
@@ -338,23 +364,24 @@ def load_nepse_data():
             "Date", "Total Positive", "Total Stock", "Positive Change %", "Label"
         ])
 
-[Previous code remains the same until display_nepse_equity function...]
-
 def display_nepse_equity():
-    """Display NEPSE data editor with full CRUD functionality."""
+    """Display NEPSE data editor with full CRUD functionality and automatic calculations."""
     st.subheader("NEPSE Equity Data")
     
+    # Load fresh data
     df = load_nepse_data()
     
     if df.empty:
         df = pd.DataFrame(columns=["Date", "Total Positive", "Total Stock", "Positive Change %", "Label"])
     
+    # Sort by date descending
     if "Date" in df.columns and not df.empty:
         df = df.sort_values("Date", ascending=False)
     
+    # Create a copy for editing
     edited_df = st.data_editor(
         df,
-        num_rows="dynamic",
+        num_rows="dynamic",  # Allow adding new rows
         key="editor_nepse",
         hide_index=True,
         column_config={
@@ -384,7 +411,7 @@ def display_nepse_equity():
         }
     )
     
-    # Handle deletions and updates
+    # Handle deletions
     deleted_rows = set(df.index) - set(edited_df.index)
     if deleted_rows:
         for idx in deleted_rows:
@@ -396,9 +423,11 @@ def display_nepse_equity():
                 else:
                     st.error(f"Failed to delete data for {date_str}")
     
+    # Handle updates and additions
     if not edited_df.equals(df):
         for _, row in edited_df.iterrows():
             if pd.notna(row["Date"]) and pd.notna(row["Total Stock"]) and pd.notna(row["Total Positive"]):
+                # Calculate Positive Change % and Label
                 if row["Total Stock"] > 0:
                     positive_change = (row["Total Positive"] / row["Total Stock"]) * 100
                     label = get_label(positive_change)
@@ -411,6 +440,7 @@ def display_nepse_equity():
                         "label": label
                     }
                     
+                    # Save to Supabase
                     response = supabase.table('nepse_equity').upsert(data_to_save).execute()
                     
                     if response.data:
@@ -418,8 +448,44 @@ def display_nepse_equity():
                     else:
                         st.error(f"Failed to update data for {data_to_save['date']}")
         
+        # Reload the data and rerun to show updates
         st.session_state.nepse_equity = load_nepse_data()
         st.rerun()
+
+def load_sector_data(sector):
+    """Load data for a specific sector from Supabase."""
+    try:
+        # Fetch data from Supabase
+        response = supabase.table('sector_data').select("*").eq('sector', sector).execute()
+        
+        # Convert the response to a DataFrame
+        if response.data:
+            df = pd.DataFrame(response.data)
+            # Rename columns to match expected format
+            column_mapping = {
+                'date': 'Date',
+                'positive_stock': 'No of positive stock',
+                'negative_stock': 'No of negative stock',
+                'no_change': 'No of No change',
+                'total_stock': 'No of total stock',
+                'positive_percentage': 'Positive %',
+                'label': 'Label'
+            }
+            df = df.rename(columns=column_mapping)
+            df["Date"] = pd.to_datetime(df["Date"])
+            return df
+        else:
+            # Create empty DataFrame with correct column names
+            return pd.DataFrame(columns=[
+                "Date", "No of positive stock", "No of negative stock",
+                "No of total stock", "No of No change", "Positive %", "Label"
+            ])
+    except Exception as e:
+        st.error(f"Error loading data for {sector}: {e}")
+        return pd.DataFrame(columns=[
+            "Date", "No of positive stock", "No of negative stock",
+            "No of total stock", "No of No change", "Positive %", "Label"
+        ])
 
 def plot_nepse_data():
     """Plot NEPSE Equity data separately."""
@@ -438,51 +504,64 @@ def plot_nepse_data():
     except Exception as e:
         st.error(f"Error plotting NEPSE data: {e}")
 
-def load_sector_data(sector):
-    """Load data for a specific sector from Supabase."""
+def save_nepse_data(date, total_positive, total_stock=None):
+    """Save NEPSE data to Supabase."""
     try:
-        response = supabase.table('sector_data').select("*").eq('sector', sector).execute()
+        # Convert date to string format
+        date_str = date.strftime("%Y-%m-%d") if isinstance(date, (datetime, pd.Timestamp)) else date
         
-        if response.data:
-            df = pd.DataFrame(response.data)
-            column_mapping = {
-                'date': 'Date',
-                'positive_stock': 'No of positive stock',
-                'negative_stock': 'No of negative stock',
-                'no_change': 'No of No change',
-                'total_stock': 'No of total stock',
-                'positive_percentage': 'Positive %',
-                'label': 'Label'
-            }
-            df = df.rename(columns=column_mapping)
-            df["Date"] = pd.to_datetime(df["Date"])
-            return df
+        # Convert values to appropriate types
+        total_positive = int(round(float(total_positive))) if total_positive is not None else None
+        total_stock = int(round(float(total_stock))) if total_stock is not None else None
+        
+        # Calculate positive change percentage
+        positive_change_percentage = None
+        if total_stock is not None and total_stock > 0 and total_positive is not None:
+            positive_change_percentage = (total_positive / total_stock) * 100
+        
+        # Prepare data for Supabase
+        data = {
+            "date": date_str,
+            "total_positive": total_positive,
+            "total_stock": total_stock,
+            "positive_change_percentage": float(positive_change_percentage) if positive_change_percentage is not None else None,
+            "label": get_label(positive_change_percentage)
+        }
+        
+        # First check if the record exists
+        existing = supabase.table('nepse_equity').select("*").eq('date', date_str).execute()
+        
+        if existing.data:
+            # Update existing record
+            response = supabase.table('nepse_equity').update(data).eq('date', date_str).execute()
         else:
-            return pd.DataFrame(columns=[
-                "Date", "No of positive stock", "No of negative stock",
-                "No of total stock", "No of No change", "Positive %", "Label"
-            ])
+            # Insert new record
+            response = supabase.table('nepse_equity').insert(data).execute()
+        
+        return bool(response.data)
+        
     except Exception as e:
-        st.error(f"Error loading data for {sector}: {e}")
-        return pd.DataFrame(columns=[
-            "Date", "No of positive stock", "No of negative stock",
-            "No of total stock", "No of No change", "Positive %", "Label"
-        ])
+        st.error(f"Error saving NEPSE data: {e}")
+        return False
 
 def delete_sector_data(sector, date):
     """Delete sector data from Supabase for a specific date."""
     try:
+        # Ensure date is in the correct format (YYYY-MM-DD)
         if isinstance(date, (datetime, pd.Timestamp)):
             date_str = date.strftime("%Y-%m-%d")
         else:
+            # If it's already a string, ensure it's in the correct format
             date_str = pd.to_datetime(date).strftime("%Y-%m-%d")
         
+        # Delete from Supabase
         response = supabase.table('sector_data')\
             .delete()\
             .eq('sector', sector)\
             .eq('date', date_str)\
             .execute()
         
+        # Check if any rows were affected
         if response.data:
             st.success(f"Successfully deleted {sector} data for {date_str}")
             return True
@@ -497,12 +576,15 @@ def delete_sector_data(sector, date):
 def delete_nepse_data(date):
     """Delete NEPSE data from Supabase for a specific date."""
     try:
+        # Ensure date is in the correct string format
         if isinstance(date, (datetime, pd.Timestamp)):
             date_str = date.strftime("%Y-%m-%d")
         else:
             date_str = date
             
+        # Delete from Supabase
         response = supabase.table('nepse_equity').delete().eq('date', date_str).execute()
+        
         return bool(response.data)
     except Exception as e:
         st.error(f"Error deleting NEPSE data: {e}")
