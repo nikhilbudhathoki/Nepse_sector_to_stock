@@ -7,6 +7,127 @@ import logging
 from datetime import datetime, timedelta
 import plotly.express as px
 import sqlite3
+import streamlit as st
+from supabase import create_client
+import pandas as pd
+from datetime import datetime
+import json
+
+class SupabaseManager:
+    def __init__(self):
+        # Initialize Supabase client
+        self.supabase = create_client(
+            st.secrets["supabase_url"],
+            st.secrets["supabase_key"]
+        )
+        self.create_tables()
+
+    def create_tables(self):
+        """
+        Create tables if they don't exist.
+        Note: You'll need to create these tables in your Supabase dashboard with the following SQL:
+        
+        CREATE TABLE raw_stock_data (
+            id BIGSERIAL PRIMARY KEY,
+            date DATE NOT NULL,
+            data JSONB NOT NULL,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc', NOW())
+        );
+
+        CREATE TABLE processed_stock_data (
+            id BIGSERIAL PRIMARY KEY,
+            date DATE NOT NULL,
+            data JSONB NOT NULL,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc', NOW())
+        );
+
+        -- Create unique indexes on date
+        CREATE UNIQUE INDEX raw_stock_data_date_idx ON raw_stock_data(date);
+        CREATE UNIQUE INDEX processed_stock_data_date_idx ON processed_stock_data(date);
+        """
+        pass  # Tables should be created via Supabase dashboard
+
+    def save_data(self, df, date, data_type):
+        """Save data to Supabase"""
+        try:
+            table_name = f"{data_type}_stock_data"
+            data_json = json.loads(df.to_json(orient='records'))
+            
+            # Convert date to string format if it's a datetime object
+            if isinstance(date, datetime):
+                date = date.strftime("%Y-%m-%d")
+            
+            # Upsert data (insert or update)
+            result = self.supabase.table(table_name).upsert({
+                'date': date,
+                'data': data_json
+            }).execute()
+            
+            return True
+        except Exception as e:
+            st.error(f"Error saving data to Supabase: {e}")
+            return False
+
+    def load_data(self, date, data_type):
+        """Load data from Supabase"""
+        try:
+            table_name = f"{data_type}_stock_data"
+            
+            # Convert date to string format if it's a datetime object
+            if isinstance(date, datetime):
+                date = date.strftime("%Y-%m-%d")
+            
+            # Query data
+            result = self.supabase.table(table_name)\
+                .select('data')\
+                .eq('date', date)\
+                .execute()
+            
+            if result.data and len(result.data) > 0:
+                # Convert JSON data back to DataFrame
+                return pd.DataFrame(result.data[0]['data'])
+            return None
+        except Exception as e:
+            st.error(f"Error loading data from Supabase: {e}")
+            return None
+
+    def get_available_dates(self, data_type):
+        """Get all available dates from Supabase"""
+        try:
+            table_name = f"{data_type}_stock_data"
+            
+            # Query all dates, ordered by date descending
+            result = self.supabase.table(table_name)\
+                .select('date')\
+                .order('date', desc=True)\
+                .execute()
+            
+            if result.data:
+                return [row['date'] for row in result.data]
+            return []
+        except Exception as e:
+            st.error(f"Error getting dates from Supabase: {e}")
+            return []
+
+    def delete_data(self, date, data_type):
+        """Delete data for a specific date"""
+        try:
+            table_name = f"{data_type}_stock_data"
+            
+            # Convert date to string format if it's a datetime object
+            if isinstance(date, datetime):
+                date = date.strftime("%Y-%m-%d")
+            
+            # Delete record
+            result = self.supabase.table(table_name)\
+                .delete()\
+                .eq('date', date)\
+                .execute()
+            
+            return True
+        except Exception as e:
+            st.error(f"Error deleting data from Supabase: {e}")
+            return False
 
 # Enhanced Logging Configuration
 logging.basicConfig(
@@ -102,6 +223,7 @@ class DatabaseManager:
 # -----------------------------------------------------------------------------
 class StockDataManager:
     def __init__(self, base_dir='stock_data'):
+        self.db_manager = SupabaseManager()
         self.base_dir = base_dir
         self._create_directories()
         self.db_manager = DatabaseManager()
@@ -198,76 +320,28 @@ class StockDataManager:
             return pd.DataFrame()
 
     def save_stock_data(self, df, data_type='raw', selected_date=None):
-        """Save stock data to both CSV and SQLite."""
+        """Save stock data to Supabase"""
         if selected_date:
             date_str = selected_date.strftime("%Y-%m-%d")
         else:
             date_str = datetime.now().strftime("%Y-%m-%d")
 
-        # Save to CSV (keeping original functionality)
-        save_dir = os.path.join(self.base_dir, f'{data_type}_data', date_str)
-        os.makedirs(save_dir, exist_ok=True)
-        filename = os.path.join(save_dir, 'stock_data.csv' if data_type == 'raw' else 'top_performers.csv')
-        df.to_csv(filename, index=False)
+        # Save to Supabase
+        return self.db_manager.save_data(df, date_str, data_type)
 
-        # Save to SQLite
-        self.db_manager.save_data(df, date_str, data_type)
-        
-        return filename
+     def save_stock_data(self, df, data_type='raw', selected_date=None):
+        """Save stock data to Supabase"""
+        if selected_date:
+            date_str = selected_date.strftime("%Y-%m-%d")
+        else:
+            date_str = datetime.now().strftime("%Y-%m-%d")
 
-    def load_stock_data(self, data_type='raw', selected_date=None):
-        """Load stock data from SQLite database."""
-        try:
-            if isinstance(selected_date, str):
-                selected_date = datetime.strptime(selected_date, "%Y-%m-%d").date()
-                
-            if selected_date:
-                date_str = selected_date.strftime("%Y-%m-%d")
-            else:
-                date_str = datetime.now().strftime("%Y-%m-%d")
-
-            # Try loading from SQLite first
-            df = self.db_manager.load_data(date_str, data_type)
-            if df is not None:
-                return df
-
-            # Fallback to CSV if SQLite data not found
-            save_dir = os.path.join(self.base_dir, f'{data_type}_data', date_str)
-            filename = os.path.join(save_dir, 'stock_data.csv' if data_type == 'raw' else 'top_performers.csv')
-            
-            if os.path.exists(filename):
-                df = pd.read_csv(filename)
-                # Save to SQLite for future use
-                self.db_manager.save_data(df, date_str, data_type)
-                return df
-            else:
-                logging.warning(f"No data found for {data_type} on {date_str}")
-                return None
-
-        except Exception as e:
-            logging.error(f"Error loading data: {e}")
-            return None
+        # Save to Supabase
+        return self.db_manager.save_data(df, date_str, data_type)
 
     def get_available_dates(self, data_type='raw'):
-        """Get available dates from both SQLite and filesystem."""
-        # Get dates from SQLite
-        db_dates = set(self.db_manager.get_available_dates(data_type))
-        
-        # Get dates from filesystem
-        data_dir = os.path.join(self.base_dir, f'{data_type}_data')
-        fs_dates = set()
-        if os.path.exists(data_dir):
-            for d in os.listdir(data_dir):
-                if os.path.isdir(os.path.join(data_dir, d)):
-                    try:
-                        datetime.strptime(d, "%Y-%m-%d")
-                        fs_dates.add(d)
-                    except ValueError:
-                        continue
-        
-        # Combine and sort dates
-        all_dates = sorted(db_dates.union(fs_dates), reverse=True)
-        return all_dates
+        """Get available dates from Supabase"""
+        return self.db_manager.get_available_dates(data_type
 
 # -----------------------------------------------------------------------------
 # Streamlit App
