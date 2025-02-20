@@ -65,27 +65,27 @@ class SupabaseManager:
             return False
 
     def load_data(self, date, data_type):
-        """Load data from Supabase"""
-        try:
-            table_name = f"{data_type}_stock_data"
-            
-            # Convert date to string format if it's a datetime object
-            if isinstance(date, datetime):
-                date = date.strftime("%Y-%m-%d")
-            
-            # Query data
-            result = self.supabase.table(table_name)\
-                .select('data')\
-                .eq('date', date)\
-                .execute()
-            
-            if result.data and len(result.data) > 0:
-                # Convert JSON data back to DataFrame
-                return pd.DataFrame(result.data[0]['data'])
-            return None
-        except Exception as e:
-            st.error(f"Error loading data from Supabase: {e}")
-            return None
+    """Load data from Supabase."""
+    try:
+        table_name = f"{data_type}_stock_data"
+        
+        # Convert date to string format if it's a datetime object
+        if isinstance(date, datetime):
+            date = date.strftime("%Y-%m-%d")
+        
+        # Query data
+        result = self.supabase.table(table_name)\
+            .select('data')\
+            .eq('date', date)\
+            .execute()
+        
+        if result.data and len(result.data) > 0:
+            # Convert JSON data back to DataFrame
+            return pd.DataFrame(result.data[0]['data'])
+        return None
+    except Exception as e:
+        st.error(f"Error loading data from Supabase: {e}")
+        return None
 
     def get_available_dates(self, data_type):
         """Get all available dates from Supabase"""
@@ -201,6 +201,29 @@ class StockDataManager:
         except Exception as e:
             logging.error(f"Scraping error: {e}")
             return None, None
+    def load_stock_data(self, data_type, date):
+    """Load stock data from Supabase for a specific date."""
+    try:
+        # Convert date to string format if it's a datetime object
+        if isinstance(date, datetime):
+            date = date.strftime("%Y-%m-%d")
+        
+        # Log the date and data type being queried
+        logging.info(f"Loading {data_type} data for date: {date}")
+        
+        # Load data from Supabase
+        df = self.db_manager.load_data(date, data_type)
+        
+        # Log the result
+        if df is not None:
+            logging.info(f"Data loaded successfully: {df.shape[0]} rows")
+        else:
+            logging.warning("No data found for the specified date and type")
+        
+        return df
+    except Exception as e:
+        logging.error(f"Error loading stock data: {e}")
+        return None
 
     def process_stock_data(self, df, change_threshold=4):
         """Process stock data to identify top performers."""
