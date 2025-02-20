@@ -2,7 +2,9 @@ import streamlit as st
 from pos import main as POS
 from main2 import main as sector_value_analysis
 from main import main as calculator
-from app import main as web_scrapping_app
+def web_scrapping_app():
+    from app import main as web_scrapping_main  # Import here to avoid circular dependency
+    return web_scrapping_main()
 from sma import main as sma_analysis
 
 # Set page config FIRST and ONLY ONCE
@@ -104,13 +106,13 @@ def render_nav():
 # Main content renderer
 def render_page():
     pages = [
-        dashboard,
-        lambda: POS(),
-        lambda: sector_value_analysis(),
-        lambda: calculator(),
-        lambda: web_scrapping_app(),
-        lambda: sma_analysis()
-    ]
+    dashboard,
+    lambda: POS(),
+    lambda: sector_value_analysis(),
+    lambda: calculator(),
+    lambda: web_scrapping_app(),  # This now calls the helper function
+    lambda: sma_analysis()
+]
     
     container = st.container()
     with container:
