@@ -2,7 +2,7 @@ import streamlit as st
 from pos import main as POS
 from main2 import main as sector_value_analysis
 from main import main as calculator
-import app as web_scrapping_app
+from app import main as web_scrapping_app
 from sma import main as sma_analysis
 
 # Set page config FIRST and ONLY ONCE
