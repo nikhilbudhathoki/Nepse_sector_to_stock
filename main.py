@@ -23,6 +23,15 @@ def init_supabase():
     return create_client(url, key)
 
 # Sector configurations
+def init_supabase():
+    url = os.getenv('SUPABASE_URL')
+    key = os.getenv('SUPABASE_KEY')
+    if not url or not key:
+        st.error("Missing Supabase credentials. Please check your .env file.")
+        return None
+    return create_client(url, key)
+
+# Sector configurations
 SECTOR_STOCKS = {
     'Commercial Bank': 19,
     'Development Bank': 15,
@@ -53,13 +62,40 @@ SECTOR_MAPPINGS = {
     'trading': 'Trading'
 }
 
+def safe_date_conversion(date_str):
+    """Safely convert date string to datetime object"""
+    try:
+        if isinstance(date_str, str):
+            return pd.to_datetime(date_str).date()
+        elif isinstance(date_str, pd.Timestamp):
+            return date_str.date()
+        elif isinstance(date_str, datetime):
+            return date_str.date()
+        return date_str
+    except Exception:
+        return None
+
 def load_data(supabase):
     """Load data from Supabase"""
     try:
         response = supabase.table(TABLE_NAME).select("*").execute()
         if response.data:
             df = pd.DataFrame(response.data)
-            df[SECTOR_DATE_COL] = pd.to_datetime(df[SECTOR_DATE_COL])
+            # Ensure date column exists
+            if SECTOR_DATE_COL not in df.columns:
+                st.error(f"Required column '{SECTOR_DATE_COL}' not found in the data.")
+                return None
+            
+            # Convert date column and handle invalid dates
+            df[SECTOR_DATE_COL] = pd.to_datetime(df[SECTOR_DATE_COL], errors='coerce')
+            df = df.dropna(subset=[SECTOR_DATE_COL])  # Remove rows with invalid dates
+            
+            # Convert numeric columns
+            numeric_cols = list(SECTOR_MAPPINGS.keys())
+            for col in numeric_cols:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+            
             return df.sort_values(SECTOR_DATE_COL)
         return pd.DataFrame(columns=[SECTOR_DATE_COL] + list(SECTOR_MAPPINGS.keys()))
     except Exception as e:
@@ -69,11 +105,22 @@ def load_data(supabase):
 def save_sector_data(supabase, data, date):
     """Create or update sector data for a specific date"""
     try:
-        # Convert date to string format
-        data[SECTOR_DATE_COL] = date.strftime('%Y-%m-%d')
+        # Ensure date is in the correct format
+        formatted_date = safe_date_conversion(date)
+        if formatted_date is None:
+            st.error("Invalid date format")
+            return False
+        
+        # Prepare data for saving
+        save_data = {k: float(v) if isinstance(v, (int, float)) else v 
+                    for k, v in data.items()}
+        save_data[SECTOR_DATE_COL] = formatted_date.strftime('%Y-%m-%d')
+        
+        # Remove any NaN values
+        save_data = {k: v for k, v in save_data.items() if pd.notna(v)}
         
         # Upsert data
-        response = supabase.table(TABLE_NAME).upsert(data).execute()
+        response = supabase.table(TABLE_NAME).upsert(save_data).execute()
         return True
     except Exception as e:
         st.error(f"Error saving data: {str(e)}")
@@ -82,9 +129,14 @@ def save_sector_data(supabase, data, date):
 def delete_sector_data(supabase, date):
     """Delete sector data for a specific date"""
     try:
+        formatted_date = safe_date_conversion(date)
+        if formatted_date is None:
+            st.error("Invalid date format")
+            return False
+            
         response = supabase.table(TABLE_NAME)\
             .delete()\
-            .eq(SECTOR_DATE_COL, date.strftime('%Y-%m-%d'))\
+            .eq(SECTOR_DATE_COL, formatted_date.strftime('%Y-%m-%d'))\
             .execute()
         return True
     except Exception as e:
@@ -93,61 +145,69 @@ def delete_sector_data(supabase, date):
 
 def calculate_sector_values(df):
     """Calculate and display sector-specific values"""
+    if df is None or df.empty:
+        st.warning("No data available for analysis")
+        return None
+        
     st.header("📈 Sector-Specific Calculations")
     
-    calculations_df = df.copy()
-    for col, sector in SECTOR_MAPPINGS.items():
-        if col in calculations_df.columns:
-            value_col = f"{sector.replace(' ', '_').replace('-', '_')}_Value"
-            calculations_df[value_col] = (calculations_df[col] / SECTOR_STOCKS[sector]) * 100
-    
-    # Sector selection
-    available_sectors = list(SECTOR_STOCKS.keys())
-    selected_sectors = st.multiselect(
-        "Select Sectors to Display",
-        ["All"] + available_sectors,
-        default=["Commercial Bank", "Development Bank"]
-    )
-    
-    if "All" in selected_sectors:
-        selected_sectors = available_sectors
-    
-    # Prepare data for display
-    sector_columns = [f"{sector.replace(' ', '_').replace('-', '_')}_Value" 
-                     for sector in selected_sectors]
-    available_columns = [col for col in sector_columns if col in calculations_df.columns]
-    
-    if not available_columns:
-        st.error("⚠️ No data available for selected sectors.")
-        return
-    
-    # Display data and chart
-    display_df = calculations_df[[SECTOR_DATE_COL] + available_columns]
-    st.write("📊 Calculated Sector Values:")
-    st.dataframe(display_df)
-    
-    # Create interactive plot
-    melted_df = display_df.melt(
-        id_vars=[SECTOR_DATE_COL],
-        value_vars=available_columns,
-        var_name="Sector",
-        value_name="Value"
-    )
-    fig = px.line(
-        melted_df,
-        x=SECTOR_DATE_COL,
-        y="Value",
-        color="Sector",
-        title="📈 Sector-Specific Value Trends Over Time",
-        template="seaborn"
-    )
-    fig.update_layout(
-        xaxis=dict(rangeslider=dict(visible=True), type='date'),
-        yaxis=dict(fixedrange=False)
-    )
-    st.plotly_chart(fig, use_container_width=True)
-    
-    return calculations_df
+    try:
+        calculations_df = df.copy()
+        for col, sector in SECTOR_MAPPINGS.items():
+            if col in calculations_df.columns:
+                value_col = f"{sector.replace(' ', '_').replace('-', '_')}_Value"
+                calculations_df[value_col] = (calculations_df[col] / SECTOR_STOCKS[sector]) * 100
+        
+        # Sector selection
+        available_sectors = list(SECTOR_STOCKS.keys())
+        selected_sectors = st.multiselect(
+            "Select Sectors to Display",
+            ["All"] + available_sectors,
+            default=["Commercial Bank", "Development Bank"]
+        )
+        
+        if "All" in selected_sectors:
+            selected_sectors = available_sectors
+        
+        # Prepare data for display
+        sector_columns = [f"{sector.replace(' ', '_').replace('-', '_')}_Value" 
+                         for sector in selected_sectors]
+        available_columns = [col for col in sector_columns if col in calculations_df.columns]
+        
+        if not available_columns:
+            st.error("⚠️ No data available for selected sectors.")
+            return None
+        
+        # Display data and chart
+        display_df = calculations_df[[SECTOR_DATE_COL] + available_columns].copy()
+        st.write("📊 Calculated Sector Values:")
+        st.dataframe(display_df)
+        
+        # Create interactive plot
+        melted_df = display_df.melt(
+            id_vars=[SECTOR_DATE_COL],
+            value_vars=available_columns,
+            var_name="Sector",
+            value_name="Value"
+        )
+        fig = px.line(
+            melted_df,
+            x=SECTOR_DATE_COL,
+            y="Value",
+            color="Sector",
+            title="📈 Sector-Specific Value Trends Over Time",
+            template="seaborn"
+        )
+        fig.update_layout(
+            xaxis=dict(rangeslider=dict(visible=True), type='date'),
+            yaxis=dict(fixedrange=False)
+        )
+        st.plotly_chart(fig, use_container_width=True)
+        
+        return calculations_df
+    except Exception as e:
+        st.error(f"Error in calculations: {str(e)}")
+        return None
 
 def data_editor_section(supabase, df):
     """Data editor section with CRUD operations"""
@@ -169,31 +229,37 @@ def data_editor_section(supabase, df):
 
         # Edit existing entries
         st.subheader("Edit Existing Entries")
-        editable_columns = [SECTOR_DATE_COL] + list(SECTOR_MAPPINGS.keys())
-        edited_df = df[editable_columns].copy() if not df.empty else pd.DataFrame(columns=editable_columns)
-        edited_data = st.data_editor(
-            edited_df,
-            num_rows="dynamic",
-            key="sector_editor"
-        )
+        if df is not None and not df.empty:
+            editable_columns = [SECTOR_DATE_COL] + list(SECTOR_MAPPINGS.keys())
+            edited_df = df[editable_columns].copy()
+            edited_data = st.data_editor(
+                edited_df,
+                num_rows="dynamic",
+                key="sector_editor"
+            )
 
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("💾 Save Changes", use_container_width=True):
-                for idx, row in edited_data.iterrows():
-                    save_sector_data(supabase, row.to_dict(), row[SECTOR_DATE_COL])
-                st.success("✅ Changes saved successfully!")
-                st.experimental_rerun()
-        
-        with col2:
-            if st.button("🗑️ Delete Selected Entry", use_container_width=True):
-                if 'sector_editor' in st.session_state and st.session_state.sector_editor["edited_rows"]:
-                    selected_date = edited_data.iloc[
-                        st.session_state.sector_editor["edited_rows"][0]
-                    ][SECTOR_DATE_COL]
-                    if delete_sector_data(supabase, selected_date):
-                        st.success(f"✅ Data for {selected_date.strftime('%Y-%m-%d')} deleted successfully!")
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("💾 Save Changes", use_container_width=True):
+                    success = True
+                    for idx, row in edited_data.iterrows():
+                        if not save_sector_data(supabase, row.to_dict(), row[SECTOR_DATE_COL]):
+                            success = False
+                    if success:
+                        st.success("✅ Changes saved successfully!")
                         st.experimental_rerun()
+            
+            with col2:
+                if st.button("🗑️ Delete Selected Entry", use_container_width=True):
+                    if 'sector_editor' in st.session_state and st.session_state.sector_editor.get("edited_rows"):
+                        selected_date = edited_data.iloc[
+                            list(st.session_state.sector_editor["edited_rows"].keys())[0]
+                        ][SECTOR_DATE_COL]
+                        if delete_sector_data(supabase, selected_date):
+                            st.success(f"✅ Data for {selected_date.strftime('%Y-%m-%d')} deleted successfully!")
+                            st.experimental_rerun()
+        else:
+            st.info("No existing entries to edit.")
 
 def main():
     st.title("🚀 NEPSE Advanced Sentiment Dashboard - Sector-Specific Calculations")
