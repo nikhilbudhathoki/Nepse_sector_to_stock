@@ -3,57 +3,15 @@ import pandas as pd
 import plotly.express as px
 from supabase import create_client
 from datetime import datetime
-import os
-from dotenv import load_dotenv
-
-# Load environment variables
-load_dotenv()
 
 # Configuration
 SECTOR_DATE_COL = 'date'
 TABLE_NAME = 'sector_calc'
 
-# Initialize Supabase client
-import streamlit as st
-import pandas as pd
-import plotly.express as px
-from supabase import create_client
-from datetime import datetime
-import os
-
-# Configuration
-SECTOR_DATE_COL = 'date'
-TABLE_NAME = 'sector_calc'
-
-# Initialize Supabase client
+# Initialize Supabase client with hardcoded credentials
 def init_supabase():
-    """Initialize Supabase client with credentials"""
-    try:
-        # First try to get from Streamlit secrets
-        url = st.secrets.get("SUPABASE_URL")
-        key = st.secrets.get("SUPABASE_KEY")
-        
-        # If not in secrets, try environment variables
-        if not url or not key:
-            url = os.environ.get("SUPABASE_URL")
-            key = os.environ.get("SUPABASE_KEY")
-        
-        # If still not found, use hardcoded values (not recommended for production)
-        if not url or not key:
-            url = "https://zjxwjeqgkanjcsrgmfri.supabase.co"
-            key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpqeHdqZXFna2FuamNzcmdtZnJpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Mzk2MDk0NTcsImV4cCI6MjA1NTE4NTQ1N30.z_L9UjokkUpBZoqAQj1OOR23MvvDWG1erHDNcr4dY6s"
-        
-        return create_client(url, key)
-    except Exception as e:
-        st.error(f"Error initializing Supabase client: {str(e)}")
-        return None
-# Sector configurations
-def init_supabase():
-    url = os.getenv('SUPABASE_URL')
-    key = os.getenv('SUPABASE_KEY')
-    if not url or not key:
-        st.error("Missing Supabase credentials. Please check your .env file.")
-        return None
+    url = "https://zjxwjeqgkanjcsrgmfri.supabase.co"
+    key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpqeHdqZXFna2FuamNzcmdtZnJpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Mzk2MDk0NTcsImV4cCI6MjA1NTE4NTQ1N30.z_L9UjokkUpBZoqAQj1OOR23MvvDWG1erHDNcr4dY6s"
     return create_client(url, key)
 
 # Sector configurations
