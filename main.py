@@ -88,22 +88,22 @@ def load_data(supabase):
 def save_sector_data(supabase, data, date):
     """Create or update sector data for a specific date"""
     try:
-        # Ensure date is in the correct format
         formatted_date = safe_date_conversion(date)
         if formatted_date is None:
             st.error("Invalid date format")
             return False
         
-        # Prepare data for saving
         save_data = {k: float(v) if isinstance(v, (int, float)) else v 
                     for k, v in data.items()}
         save_data[SECTOR_DATE_COL] = formatted_date.strftime('%Y-%m-%d')
-        
-        # Remove any NaN values
         save_data = {k: v for k, v in save_data.items() if pd.notna(v)}
         
-        # Upsert data
-        response = supabase.table(TABLE_NAME).upsert(save_data).execute()
+        # Modified upsert with conflict resolution
+        response = supabase.table(TABLE_NAME).upsert(
+            save_data,
+            on_conflict='date'  # Add conflict resolution target
+        ).execute()
+        
         return True
     except Exception as e:
         st.error(f"Error saving data: {str(e)}")
