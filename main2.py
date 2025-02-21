@@ -6,6 +6,28 @@ from supabase import create_client
 
 # Configuration
 SECTOR_DATE_COL = 'date'  # Changed to lowercase to match Supabase convention
+from supabase import create_client
+
+
+
+# Define allowed sectors with display names and database names mapping
+SECTOR_MAPPING = {
+    "Hydropower": "hydropower",
+    "C. Bank": "c_bank",
+    "D. Bank": "d_bank",
+    "Finance": "finance",
+    "Hotels": "hotels",
+    "Microfinance": "microfinance",
+    "Investments": "investments",
+    "Life insurance": "life_insurance",
+    "Non-life insurance": "non_life_insurance",
+    "Others": "others",
+    "Manufacture": "manufacture",
+    "Tradings": "tradings"
+}
+
+ALLOWED_SECTORS = list(SECTOR_MAPPING.keys())
+DB_COLUMNS = list(SECTOR_MAPPING.values())
 
 # Define allowed sectors
 ALLOWED_SECTORS = [
@@ -83,6 +105,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
+
 @st.cache_data(ttl=0, show_spinner="Loading sector data...")
 def load_data():
     """Load and process data from Supabase with validation"""
@@ -100,6 +123,10 @@ def load_data():
             # Convert date column to datetime
             df[SECTOR_DATE_COL] = pd.to_datetime(df[SECTOR_DATE_COL])
             
+            # Rename columns from database names to display names
+            reverse_mapping = {v: k for k, v in SECTOR_MAPPING.items()}
+            df = df.rename(columns=reverse_mapping)
+            
             # Ensure all sectors exist with default values
             for sector in ALLOWED_SECTORS:
                 if sector not in df.columns:
@@ -112,21 +139,22 @@ def load_data():
         st.error(f"Data loading error: {str(e)}")
         return None
 
-# [Previous imports and configurations remain the same...]
-
 def save_sector_data(edited_df):
     """Save sector data to Supabase"""
     try:
         # Create a copy of the dataframe
         save_df = edited_df.copy()
         
-        # Convert datetime to string format that Supabase expects
+        # Convert datetime to string format
         if isinstance(save_df[SECTOR_DATE_COL].iloc[0], pd.Timestamp):
             save_df[SECTOR_DATE_COL] = save_df[SECTOR_DATE_COL].apply(lambda x: x.strftime('%Y-%m-%d'))
         
+        # Rename columns from display names to database names
+        save_df = save_df.rename(columns=SECTOR_MAPPING)
+        
         # Convert all numeric columns to float
-        for sector in ALLOWED_SECTORS:
-            save_df[sector] = save_df[sector].astype(float)
+        for col in DB_COLUMNS:
+            save_df[col] = save_df[col].astype(float)
         
         # Convert DataFrame to records
         records = save_df.to_dict('records')
@@ -201,7 +229,6 @@ def create_sector_time_series(data, selected_sector):
 def main():
     st.title("📊 NEPSE Sector Analysis")
     
-    # Add connection status indicator
     try:
         supabase.table('sector_weights').select('date').limit(1).execute()
         st.sidebar.success('🟢 Connected to database')
@@ -209,6 +236,7 @@ def main():
         st.sidebar.error('🔴 Database connection failed')
         st.error(f"Database connection error: {str(e)}")
         return
+
     
     # Load sector data
     sector_data = load_data()
