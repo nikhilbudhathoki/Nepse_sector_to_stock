@@ -14,7 +14,7 @@ def init_supabase():
     key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpqeHdqZXFna2FuamNzcmdtZnJpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Mzk2MDk0NTcsImV4cCI6MjA1NTE4NTQ1N30.z_L9UjokkUpBZoqAQj1OOR23MvvDWG1erHDNcr4dY6s"
     return create_client(url, key)
 
-# Sector configurations
+# Sector configurations remain the same
 SECTOR_STOCKS = {
     'Commercial Bank': 19,
     'Development Bank': 15,
@@ -64,16 +64,13 @@ def load_data(supabase):
         response = supabase.table(TABLE_NAME).select("*").execute()
         if response.data:
             df = pd.DataFrame(response.data)
-            # Ensure date column exists
             if SECTOR_DATE_COL not in df.columns:
                 st.error(f"Required column '{SECTOR_DATE_COL}' not found in the data.")
                 return None
             
-            # Convert date column and handle invalid dates
             df[SECTOR_DATE_COL] = pd.to_datetime(df[SECTOR_DATE_COL], errors='coerce')
-            df = df.dropna(subset=[SECTOR_DATE_COL])  # Remove rows with invalid dates
+            df = df.dropna(subset=[SECTOR_DATE_COL])
             
-            # Convert numeric columns
             numeric_cols = list(SECTOR_MAPPINGS.keys())
             for col in numeric_cols:
                 if col in df.columns:
@@ -98,10 +95,9 @@ def save_sector_data(supabase, data, date):
         save_data[SECTOR_DATE_COL] = formatted_date.strftime('%Y-%m-%d')
         save_data = {k: v for k, v in save_data.items() if pd.notna(v)}
         
-        # Modified upsert with conflict resolution
         response = supabase.table(TABLE_NAME).upsert(
             save_data,
-            on_conflict='date'  # Add conflict resolution target
+            on_conflict='date'
         ).execute()
         
         return True
@@ -110,14 +106,13 @@ def save_sector_data(supabase, data, date):
         return False
 
 def delete_sector_data(supabase, date):
-    """Delete sector data for a specific date with improved error handling"""
+    """Delete sector data for a specific date"""
     try:
         formatted_date = safe_date_conversion(date)
         if formatted_date is None:
             st.error("Invalid date format")
             return False
         
-        # Verify the data exists before attempting deletion
         check_existing = supabase.table(TABLE_NAME)\
             .select("*")\
             .eq(SECTOR_DATE_COL, formatted_date.strftime('%Y-%m-%d'))\
@@ -127,7 +122,6 @@ def delete_sector_data(supabase, date):
             st.warning(f"No data found for {formatted_date}")
             return False
             
-        # Perform deletion
         response = supabase.table(TABLE_NAME)\
             .delete()\
             .eq(SECTOR_DATE_COL, formatted_date.strftime('%Y-%m-%d'))\
@@ -137,7 +131,7 @@ def delete_sector_data(supabase, date):
     except Exception as e:
         st.error(f"Error deleting data: {str(e)}")
         return False
-        
+
 def calculate_sector_values(df):
     """Calculate and display sector-specific values"""
     if df is None or df.empty:
@@ -153,7 +147,6 @@ def calculate_sector_values(df):
                 value_col = f"{sector.replace(' ', '_').replace('-', '_')}_Value"
                 calculations_df[value_col] = (calculations_df[col] / SECTOR_STOCKS[sector]) * 100
         
-        # Sector selection
         available_sectors = list(SECTOR_STOCKS.keys())
         selected_sectors = st.multiselect(
             "Select Sectors to Display",
@@ -164,7 +157,6 @@ def calculate_sector_values(df):
         if "All" in selected_sectors:
             selected_sectors = available_sectors
         
-        # Prepare data for display
         sector_columns = [f"{sector.replace(' ', '_').replace('-', '_')}_Value" 
                          for sector in selected_sectors]
         available_columns = [col for col in sector_columns if col in calculations_df.columns]
@@ -173,12 +165,10 @@ def calculate_sector_values(df):
             st.error("⚠️ No data available for selected sectors.")
             return None
         
-        # Display data and chart
         display_df = calculations_df[[SECTOR_DATE_COL] + available_columns].copy()
         st.write("📊 Calculated Sector Values:")
         st.dataframe(display_df)
         
-        # Create interactive plot
         melted_df = display_df.melt(
             id_vars=[SECTOR_DATE_COL],
             value_vars=available_columns,
@@ -203,23 +193,20 @@ def calculate_sector_values(df):
     except Exception as e:
         st.error(f"Error in calculations: {str(e)}")
         return None
- def data_editor_section(supabase, df):
+
+def data_editor_section(supabase, df):
     """Data editor section with improved CRUD operations"""
     with st.expander("✏️ Edit Sector Values", expanded=False):
-        # Create new entry section
         st.subheader("Add New Entry")
         col1, col2 = st.columns(2)
         
-        # Initialize new entry form
         with col1:
             new_date = st.date_input("Select Date", datetime.now())
         
-        # Create form for new entry
         with st.form(key="new_entry_form"):
             cols = st.columns(3)
             new_values = {}
             
-            # Create input fields for each sector
             for idx, (key, sector) in enumerate(SECTOR_MAPPINGS.items()):
                 col_idx = idx % 3
                 with cols[col_idx]:
@@ -232,7 +219,6 @@ def calculate_sector_values(df):
             
             submit_button = st.form_submit_button(label="➕ Add New Entry")
             if submit_button:
-                # Check if date already exists
                 existing_data = supabase.table(TABLE_NAME)\
                     .select("*")\
                     .eq(SECTOR_DATE_COL, new_date.strftime('%Y-%m-%d'))\
@@ -249,34 +235,27 @@ def calculate_sector_values(df):
                         st.success("✅ New entry added successfully!")
                         st.experimental_rerun()
 
-        # Edit existing entries
         st.subheader("Edit Existing Entries")
         if df is not None and not df.empty:
-            # Sort DataFrame by date in descending order
             df_sorted = df.sort_values(SECTOR_DATE_COL, ascending=False)
-            
-            # Convert date column to string for better display
             editable_columns = [SECTOR_DATE_COL] + list(SECTOR_MAPPINGS.keys())
             edited_df = df_sorted[editable_columns].copy()
             
-            # Create a multi-select for row selection
             selected_indices = st.multiselect(
                 "Select rows to delete:",
                 options=edited_df.index.tolist(),
                 format_func=lambda x: f"{edited_df.loc[x, SECTOR_DATE_COL].strftime('%Y-%m-%d')}"
             )
             
-            # Data editor with key based on data
             edited_data = st.data_editor(
                 edited_df,
                 key=f"sector_editor_{df.shape[0]}",
-                disabled=[SECTOR_DATE_COL],  # Prevent date modification
+                disabled=[SECTOR_DATE_COL],
                 hide_index=True
             )
 
             col1, col2 = st.columns(2)
             
-            # Save changes
             with col1:
                 if st.button("💾 Save Changes", use_container_width=True):
                     changes_made = False
@@ -292,7 +271,6 @@ def calculate_sector_values(df):
                     else:
                         st.info("No changes detected.")
             
-            # Delete selected rows
             with col2:
                 if selected_indices and st.button("🗑️ Delete Selected Rows", use_container_width=True):
                     success = True
@@ -311,12 +289,10 @@ def calculate_sector_values(df):
 def main():
     st.title("🚀 NEPSE Advanced Sentiment Dashboard - Sector-Specific Calculations")
     
-    # Initialize Supabase client
     supabase = init_supabase()
     if not supabase:
         return
     
-    # Load data
     sector_data = load_data(supabase)
     if sector_data is None:
         st.error("Failed to load data from database.")
@@ -325,10 +301,7 @@ def main():
     if sector_data.empty:
         st.info("📝 No data available. Start by adding sector data using the editor below.")
     
-    # Calculate and display sector values
     calculations_df = calculate_sector_values(sector_data)
-    
-    # Data editor section
     data_editor_section(supabase, sector_data)
 
 if __name__ == "__main__":
