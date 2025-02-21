@@ -139,7 +139,7 @@ def load_data():
         return None
 
 def save_sector_data(edited_df):
-    """Save sector data to Supabase"""
+    """Save sector data to Supabase with improved error handling"""
     try:
         # Create a copy and convert dates
         save_df = edited_df.copy()
@@ -150,30 +150,48 @@ def save_sector_data(edited_df):
         # Now format as string
         save_df[SECTOR_DATE_COL] = save_df[SECTOR_DATE_COL].dt.strftime('%Y-%m-%d')
         
-        # Rest of the function remains the same...
         # Rename columns to database names
         save_df = save_df.rename(columns=SECTOR_MAPPING)
         
+        # Verify all required columns exist
+        missing_columns = set(DB_COLUMNS) - set(save_df.columns)
+        if missing_columns:
+            raise ValueError(f"Missing columns in DataFrame: {missing_columns}")
+            
         # Convert to float for numeric columns
         for col in DB_COLUMNS:
             save_df[col] = save_df[col].astype(float)
+        
+        # Debug: Print the exact data being sent
+        st.write("Debug - Data being sent to database:")
+        st.write(save_df.head())
+        st.write("Column names:", save_df.columns.tolist())
         
         # Convert to records
         records = save_df.to_dict('records')
         
         # Delete existing records
-        supabase.table('sector_weights').delete().neq('id', 0).execute()
+        delete_response = supabase.table('sector_weights').delete().neq('id', 0).execute()
+        st.write("Debug - Delete response:", delete_response)
         
         # Insert new records
         for record in records:
+            # Debug: Print each record before insertion
+            st.write("Debug - Inserting record:", record)
+            
             response = supabase.table('sector_weights').insert(record).execute()
             if hasattr(response, 'error') and response.error:
                 raise Exception(f"Insert error: {response.error}")
         
         return True
+        
+    except ValueError as ve:
+        st.error(f"Validation error: {str(ve)}")
+        return False
     except Exception as e:
         st.error(f"Save error: {str(e)}")
-        st.write("Full error:", e)  # Debug line
+        st.write("Full error:", e)
+        st.write("Error type:", type(e).__name__)
         return False
 
 def create_sector_chart(data, selected_date):
