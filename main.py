@@ -110,22 +110,34 @@ def save_sector_data(supabase, data, date):
         return False
 
 def delete_sector_data(supabase, date):
-    """Delete sector data for a specific date"""
+    """Delete sector data for a specific date with improved error handling"""
     try:
         formatted_date = safe_date_conversion(date)
         if formatted_date is None:
             st.error("Invalid date format")
             return False
+        
+        # Verify the data exists before attempting deletion
+        check_existing = supabase.table(TABLE_NAME)\
+            .select("*")\
+            .eq(SECTOR_DATE_COL, formatted_date.strftime('%Y-%m-%d'))\
+            .execute()
             
+        if not check_existing.data:
+            st.warning(f"No data found for {formatted_date}")
+            return False
+            
+        # Perform deletion
         response = supabase.table(TABLE_NAME)\
             .delete()\
             .eq(SECTOR_DATE_COL, formatted_date.strftime('%Y-%m-%d'))\
             .execute()
-        return True
+        
+        return True if response.data else False
     except Exception as e:
         st.error(f"Error deleting data: {str(e)}")
         return False
-
+        
 def calculate_sector_values(df):
     """Calculate and display sector-specific values"""
     if df is None or df.empty:
@@ -191,56 +203,108 @@ def calculate_sector_values(df):
     except Exception as e:
         st.error(f"Error in calculations: {str(e)}")
         return None
-
-def data_editor_section(supabase, df):
-    """Data editor section with CRUD operations"""
+ def data_editor_section(supabase, df):
+    """Data editor section with improved CRUD operations"""
     with st.expander("✏️ Edit Sector Values", expanded=False):
         # Create new entry section
         st.subheader("Add New Entry")
         col1, col2 = st.columns(2)
+        
+        # Initialize new entry form
         with col1:
             new_date = st.date_input("Select Date", datetime.now())
-        with col2:
-            if st.button("➕ Add New Entry", use_container_width=True):
-                new_data = {
-                    SECTOR_DATE_COL: new_date,
-                    **{sector: 0.0 for sector in SECTOR_MAPPINGS.keys()}
-                }
-                if save_sector_data(supabase, new_data, new_date):
-                    st.success("✅ New entry added successfully!")
-                    st.experimental_rerun()
+        
+        # Create form for new entry
+        with st.form(key="new_entry_form"):
+            cols = st.columns(3)
+            new_values = {}
+            
+            # Create input fields for each sector
+            for idx, (key, sector) in enumerate(SECTOR_MAPPINGS.items()):
+                col_idx = idx % 3
+                with cols[col_idx]:
+                    new_values[key] = st.number_input(
+                        f"{sector}",
+                        value=0.0,
+                        format="%.2f",
+                        key=f"new_{key}"
+                    )
+            
+            submit_button = st.form_submit_button(label="➕ Add New Entry")
+            if submit_button:
+                # Check if date already exists
+                existing_data = supabase.table(TABLE_NAME)\
+                    .select("*")\
+                    .eq(SECTOR_DATE_COL, new_date.strftime('%Y-%m-%d'))\
+                    .execute()
+                
+                if existing_data.data:
+                    st.error(f"Entry for {new_date} already exists. Please use the edit section below.")
+                else:
+                    new_data = {
+                        SECTOR_DATE_COL: new_date,
+                        **new_values
+                    }
+                    if save_sector_data(supabase, new_data, new_date):
+                        st.success("✅ New entry added successfully!")
+                        st.experimental_rerun()
 
         # Edit existing entries
         st.subheader("Edit Existing Entries")
         if df is not None and not df.empty:
+            # Sort DataFrame by date in descending order
+            df_sorted = df.sort_values(SECTOR_DATE_COL, ascending=False)
+            
+            # Convert date column to string for better display
             editable_columns = [SECTOR_DATE_COL] + list(SECTOR_MAPPINGS.keys())
-            edited_df = df[editable_columns].copy()
+            edited_df = df_sorted[editable_columns].copy()
+            
+            # Create a multi-select for row selection
+            selected_indices = st.multiselect(
+                "Select rows to delete:",
+                options=edited_df.index.tolist(),
+                format_func=lambda x: f"{edited_df.loc[x, SECTOR_DATE_COL].strftime('%Y-%m-%d')}"
+            )
+            
+            # Data editor with key based on data
             edited_data = st.data_editor(
                 edited_df,
-                num_rows="dynamic",
-                key="sector_editor"
+                key=f"sector_editor_{df.shape[0]}",
+                disabled=[SECTOR_DATE_COL],  # Prevent date modification
+                hide_index=True
             )
 
             col1, col2 = st.columns(2)
+            
+            # Save changes
             with col1:
                 if st.button("💾 Save Changes", use_container_width=True):
-                    success = True
+                    changes_made = False
                     for idx, row in edited_data.iterrows():
-                        if not save_sector_data(supabase, row.to_dict(), row[SECTOR_DATE_COL]):
-                            success = False
-                    if success:
+                        original_row = df_sorted.loc[idx]
+                        if not row.equals(original_row):
+                            if save_sector_data(supabase, row.to_dict(), row[SECTOR_DATE_COL]):
+                                changes_made = True
+                    
+                    if changes_made:
                         st.success("✅ Changes saved successfully!")
                         st.experimental_rerun()
+                    else:
+                        st.info("No changes detected.")
             
+            # Delete selected rows
             with col2:
-                if st.button("🗑️ Delete Selected Entry", use_container_width=True):
-                    if 'sector_editor' in st.session_state and st.session_state.sector_editor.get("edited_rows"):
-                        selected_date = edited_data.iloc[
-                            list(st.session_state.sector_editor["edited_rows"].keys())[0]
-                        ][SECTOR_DATE_COL]
-                        if delete_sector_data(supabase, selected_date):
-                            st.success(f"✅ Data for {selected_date.strftime('%Y-%m-%d')} deleted successfully!")
-                            st.experimental_rerun()
+                if selected_indices and st.button("🗑️ Delete Selected Rows", use_container_width=True):
+                    success = True
+                    for idx in selected_indices:
+                        date_to_delete = edited_df.loc[idx, SECTOR_DATE_COL]
+                        if not delete_sector_data(supabase, date_to_delete):
+                            success = False
+                            st.error(f"Failed to delete entry for {date_to_delete}")
+                    
+                    if success:
+                        st.success("✅ Selected entries deleted successfully!")
+                        st.experimental_rerun()
         else:
             st.info("No existing entries to edit.")
 
