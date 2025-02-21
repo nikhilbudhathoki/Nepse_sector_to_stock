@@ -111,69 +111,67 @@ def load_data():
     """Load and process data from Supabase with validation"""
     try:
         response = supabase.table('sector_weights').select('*').order('date').execute()
-        if response.data:
-            df = pd.DataFrame(response.data)
-            
-            # Drop the id and created_at columns from Supabase
-            if 'id' in df.columns:
-                df = df.drop('id', axis=1)
-            if 'created_at' in df.columns:
-                df = df.drop('created_at', axis=1)
-            
-            # Convert date column to datetime
-            df[SECTOR_DATE_COL] = pd.to_datetime(df[SECTOR_DATE_COL])
-            
-            # Rename columns from database names to display names
-            reverse_mapping = {v: k for k, v in SECTOR_MAPPING.items()}
-            df = df.rename(columns=reverse_mapping)
-            
-            # Ensure all sectors exist with default values
-            for sector in ALLOWED_SECTORS:
-                if sector not in df.columns:
-                    df[sector] = 0.0
-            
-            return df.sort_values(SECTOR_DATE_COL)
-        else:
+        
+        if not response.data:
             return pd.DataFrame(columns=[SECTOR_DATE_COL] + ALLOWED_SECTORS)
+            
+        df = pd.DataFrame(response.data)
+        
+        # Drop the id and created_at columns
+        df = df.drop(['id', 'created_at'], axis=1, errors='ignore')
+        
+        # Convert date column to datetime
+        df[SECTOR_DATE_COL] = pd.to_datetime(df[SECTOR_DATE_COL])
+        
+        # Rename columns from database names to display names
+        reverse_mapping = {v: k for k, v in SECTOR_MAPPING.items()}
+        df = df.rename(columns=reverse_mapping)
+        
+        # Ensure all sectors exist with default values
+        for sector in ALLOWED_SECTORS:
+            if sector not in df.columns:
+                df[sector] = 0.0
+                
+        return df.sort_values(SECTOR_DATE_COL)
     except Exception as e:
         st.error(f"Data loading error: {str(e)}")
+        st.write("Full error:", e)  # Debug line
         return None
 
 def save_sector_data(edited_df):
     """Save sector data to Supabase"""
     try:
-        # Create a copy of the dataframe
+        # Create a copy and convert dates
         save_df = edited_df.copy()
+        save_df[SECTOR_DATE_COL] = save_df[SECTOR_DATE_COL].apply(lambda x: x.strftime('%Y-%m-%d'))
         
-        # Convert datetime to string format
-        if isinstance(save_df[SECTOR_DATE_COL].iloc[0], pd.Timestamp):
-            save_df[SECTOR_DATE_COL] = save_df[SECTOR_DATE_COL].apply(lambda x: x.strftime('%Y-%m-%d'))
-        
-        # Rename columns from display names to database names
+        # Rename columns to database names
         save_df = save_df.rename(columns=SECTOR_MAPPING)
         
-        # Convert all numeric columns to float
+        # Convert to float for numeric columns
         for col in DB_COLUMNS:
             save_df[col] = save_df[col].astype(float)
         
-        # Convert DataFrame to records
+        # Convert to records
         records = save_df.to_dict('records')
         
-        # Delete all existing records
+        # Debug output
+        st.write("Debug - First record to be saved:", records[0])
+        
+        # Delete existing records
         supabase.table('sector_weights').delete().neq('id', 0).execute()
         
-        # Insert new records in batches
-        batch_size = 100
-        for i in range(0, len(records), batch_size):
-            batch = records[i:i + batch_size]
-            supabase.table('sector_weights').insert(batch).execute()
-            
+        # Insert new records
+        for record in records:
+            response = supabase.table('sector_weights').insert(record).execute()
+            if hasattr(response, 'error') and response.error:
+                raise Exception(f"Insert error: {response.error}")
+        
         return True
     except Exception as e:
         st.error(f"Save error: {str(e)}")
+        st.write("Full error:", e)  # Debug line
         return False
-
-# [Rest of the code remains the same...]
 
 def create_sector_chart(data, selected_date):
     """Create sector bar chart for selected date"""
@@ -226,9 +224,12 @@ def create_sector_time_series(data, selected_sector):
     )
     return fig
 
+
+
 def main():
     st.title("📊 NEPSE Sector Analysis")
     
+    # Add connection status indicator
     try:
         supabase.table('sector_weights').select('date').limit(1).execute()
         st.sidebar.success('🟢 Connected to database')
@@ -236,7 +237,6 @@ def main():
         st.sidebar.error('🔴 Database connection failed')
         st.error(f"Database connection error: {str(e)}")
         return
-
     
     # Load sector data
     sector_data = load_data()
@@ -318,3 +318,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
