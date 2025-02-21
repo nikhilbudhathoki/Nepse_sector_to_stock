@@ -246,7 +246,117 @@ def create_sector_time_series(data, selected_sector):
     return fig
 
 
+def handle_data_changes(edited_df, previous_df):
+    """Handle CRUD operations by comparing edited data with previous data"""
+    try:
+        if previous_df is None or previous_df.empty:
+            # If no previous data, treat all rows as new
+            return handle_create_all(edited_df)
+            
+        # Convert date columns to datetime for comparison
+        edited_df[SECTOR_DATE_COL] = pd.to_datetime(edited_df[SECTOR_DATE_COL])
+        previous_df[SECTOR_DATE_COL] = pd.to_datetime(previous_df[SECTOR_DATE_COL])
+        
+        # Identify deleted rows
+        deleted_dates = set(previous_df[SECTOR_DATE_COL]) - set(edited_df[SECTOR_DATE_COL])
+        if deleted_dates:
+            handle_deletes(deleted_dates)
+            
+        # Identify new and updated rows
+        for idx, row in edited_df.iterrows():
+            current_date = row[SECTOR_DATE_COL]
+            
+            # Check if this is a new row
+            if current_date not in previous_df[SECTOR_DATE_COL].values:
+                handle_create(row)
+            else:
+                # Check if row was modified
+                prev_row = previous_df[previous_df[SECTOR_DATE_COL] == current_date].iloc[0]
+                if not row.equals(prev_row):
+                    handle_update(row)
+        
+        return True
+    except Exception as e:
+        st.error(f"Error handling data changes: {str(e)}")
+        return False
 
+def handle_create_all(df):
+    """Handle initial data creation"""
+    try:
+        save_df = prepare_dataframe_for_save(df)
+        records = save_df.to_dict('records')
+        
+        for record in records:
+            response = supabase.table('sector_weights').insert(record).execute()
+            if hasattr(response, 'error') and response.error:
+                raise Exception(f"Insert error: {response.error}")
+        return True
+    except Exception as e:
+        st.error(f"Error creating records: {str(e)}")
+        return False
+
+def handle_create(row):
+    """Handle single row creation"""
+    try:
+        record = prepare_row_for_save(row)
+        response = supabase.table('sector_weights').insert(record).execute()
+        if hasattr(response, 'error') and response.error:
+            raise Exception(f"Insert error: {response.error}")
+        st.success(f"Added record for date: {record['date']}")
+    except Exception as e:
+        st.error(f"Error creating record: {str(e)}")
+
+def handle_update(row):
+    """Handle single row update"""
+    try:
+        record = prepare_row_for_save(row)
+        response = supabase.table('sector_weights')\
+            .update(record)\
+            .eq('date', record['date'])\
+            .execute()
+        if hasattr(response, 'error') and response.error:
+            raise Exception(f"Update error: {response.error}")
+        st.success(f"Updated record for date: {record['date']}")
+    except Exception as e:
+        st.error(f"Error updating record: {str(e)}")
+
+def handle_deletes(deleted_dates):
+    """Handle deletion of rows"""
+    try:
+        for date in deleted_dates:
+            formatted_date = date.strftime('%Y-%m-%d')
+            response = supabase.table('sector_weights')\
+                .delete()\
+                .eq('date', formatted_date)\
+                .execute()
+            if hasattr(response, 'error') and response.error:
+                raise Exception(f"Delete error: {response.error}")
+            st.success(f"Deleted record for date: {formatted_date}")
+    except Exception as e:
+        st.error(f"Error deleting records: {str(e)}")
+
+def prepare_dataframe_for_save(df):
+    """Prepare DataFrame for saving to database"""
+    save_df = df.copy()
+    save_df[SECTOR_DATE_COL] = pd.to_datetime(save_df[SECTOR_DATE_COL])
+    save_df[SECTOR_DATE_COL] = save_df[SECTOR_DATE_COL].dt.strftime('%Y-%m-%d')
+    save_df = save_df.rename(columns=SECTOR_MAPPING)
+    
+    for col in DB_COLUMNS:
+        save_df[col] = save_df[col].astype(float)
+    
+    return save_df
+
+def prepare_row_for_save(row):
+    """Prepare single row for saving to database"""
+    record = row.copy()
+    record[SECTOR_DATE_COL] = pd.to_datetime(record[SECTOR_DATE_COL]).strftime('%Y-%m-%d')
+    
+    # Convert to dictionary and rename columns
+    record_dict = record.to_dict()
+    renamed_dict = {SECTOR_MAPPING.get(k, k): v for k, v in record_dict.items()}
+    
+    return renamed_dict
 def main():
     st.title("📊 NEPSE Sector Analysis")
     
@@ -265,6 +375,10 @@ def main():
     if sector_data is None or sector_data.empty:
         st.warning("⚠️ No sector data available. Please add data using the editor below.")
         sector_data = pd.DataFrame(columns=[SECTOR_DATE_COL] + ALLOWED_SECTORS)
+    
+    # Store the current state of data before editing
+    if 'previous_data' not in st.session_state:
+        st.session_state.previous_data = sector_data.copy()
     
     # Create two columns for the date selectors
     col1, col2 = st.columns(2)
@@ -300,10 +414,46 @@ def main():
         else:
             st.warning(f"⚠️ No data available for {selected_sector}")
     
+    # Add summary statistics
+    st.markdown("---")
+    if not sector_data.empty:
+        with st.expander("📊 Summary Statistics", expanded=False):
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.metric(
+                    "Total Records",
+                    len(sector_data),
+                    "Available Dates"
+                )
+                
+            with col2:
+                date_range = f"{sector_data[SECTOR_DATE_COL].min().strftime('%Y-%m-%d')} to {sector_data[SECTOR_DATE_COL].max().strftime('%Y-%m-%d')}"
+                st.metric(
+                    "Date Range",
+                    date_range
+                )
+                
+            with col3:
+                total_weight = sector_data[ALLOWED_SECTORS].sum(axis=1).mean()
+                st.metric(
+                    "Avg Total Weight",
+                    f"{total_weight:.2f}%"
+                )
+    
     # Data editor section
     st.markdown("---")
     with st.expander("✏️ Edit Sector Weights", expanded=True):
         st.markdown("<div style='height: 40px'></div>", unsafe_allow_html=True)
+        
+        # Add instructions
+        st.info("""
+        📝 Instructions:
+        - Add new row: Click '+' at bottom
+        - Edit: Click cell to modify
+        - Delete: Select row(s) and press 'Delete' key
+        - All changes saved automatically
+        """)
         
         edited_data = st.data_editor(
             sector_data,
@@ -324,19 +474,54 @@ def main():
                     width="medium"
                 ) for col in ALLOWED_SECTORS}
             },
-            height=400
+            height=400,
+            key="sector_editor",
+            use_container_width=True
         )
         
-        st.markdown("<div style='height: 200px'></div>", unsafe_allow_html=True)
+        # Add data validation feedback
+        if not edited_data.empty:
+            total_weights = edited_data[ALLOWED_SECTORS].sum(axis=1)
+            invalid_dates = edited_data[total_weights < 99.9][SECTOR_DATE_COL].tolist()
+            
+            if invalid_dates:
+                st.warning(f"⚠️ Total weights less than 100% for dates: {', '.join([d.strftime('%Y-%m-%d') for d in invalid_dates])}")
         
-        if st.button("💾 Save Changes", type="primary"):
-            if edited_data[SECTOR_DATE_COL].duplicated().any():
-                st.error("Duplicate dates found. Please ensure unique dates.")
-            elif save_sector_data(edited_data):
-                st.success("Data saved successfully! Refreshing...")
-                st.cache_data.clear()
-                st.rerun()
+        st.markdown("<div style='height: 20px'></div>", unsafe_allow_html=True)
+        
+        col1, col2 = st.columns([1, 4])
+        with col1:
+            if st.button("💾 Save Changes", type="primary", use_container_width=True):
+                if edited_data[SECTOR_DATE_COL].duplicated().any():
+                    st.error("❌ Duplicate dates found. Please ensure unique dates.")
+                elif handle_data_changes(edited_data, st.session_state.previous_data):
+                    st.success("✅ All changes saved successfully! Refreshing...")
+                    st.session_state.previous_data = edited_data.copy()
+                    st.cache_data.clear()
+                    st.rerun()
+        
+        with col2:
+            # Add download button for current data
+            if not edited_data.empty:
+                csv = edited_data.to_csv(index=False)
+                st.download_button(
+                    label="📥 Download Data as CSV",
+                    data=csv,
+                    file_name="sector_weights.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+    
+    # Add footer
+    st.markdown("---")
+    st.markdown(
+        """
+        <div style='text-align: center; color: #666;'>
+            <small>Last updated: {}</small>
+        </div>
+        """.format(datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+        unsafe_allow_html=True
+    )
 
 if __name__ == "__main__":
     main()
-
