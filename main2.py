@@ -112,12 +112,21 @@ def load_data():
         st.error(f"Data loading error: {str(e)}")
         return None
 
+# [Previous imports and configurations remain the same...]
+
 def save_sector_data(edited_df):
     """Save sector data to Supabase"""
     try:
-        # Prepare data for saving
+        # Create a copy of the dataframe
         save_df = edited_df.copy()
-        save_df[SECTOR_DATE_COL] = save_df[SECTOR_DATE_COL].dt.strftime('%Y-%m-%d')
+        
+        # Convert datetime to string format that Supabase expects
+        if isinstance(save_df[SECTOR_DATE_COL].iloc[0], pd.Timestamp):
+            save_df[SECTOR_DATE_COL] = save_df[SECTOR_DATE_COL].apply(lambda x: x.strftime('%Y-%m-%d'))
+        
+        # Convert all numeric columns to float
+        for sector in ALLOWED_SECTORS:
+            save_df[sector] = save_df[sector].astype(float)
         
         # Convert DataFrame to records
         records = save_df.to_dict('records')
@@ -125,14 +134,18 @@ def save_sector_data(edited_df):
         # Delete all existing records
         supabase.table('sector_weights').delete().neq('id', 0).execute()
         
-        # Insert new records
-        for record in records:
-            supabase.table('sector_weights').insert(record).execute()
+        # Insert new records in batches
+        batch_size = 100
+        for i in range(0, len(records), batch_size):
+            batch = records[i:i + batch_size]
+            supabase.table('sector_weights').insert(batch).execute()
             
         return True
     except Exception as e:
         st.error(f"Save error: {str(e)}")
         return False
+
+# [Rest of the code remains the same...]
 
 def create_sector_chart(data, selected_date):
     """Create sector bar chart for selected date"""
