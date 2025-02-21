@@ -143,8 +143,14 @@ def save_sector_data(edited_df):
     try:
         # Create a copy and convert dates
         save_df = edited_df.copy()
-        save_df[SECTOR_DATE_COL] = save_df[SECTOR_DATE_COL].apply(lambda x: x.strftime('%Y-%m-%d'))
         
+        # Convert date column to datetime first
+        save_df[SECTOR_DATE_COL] = pd.to_datetime(save_df[SECTOR_DATE_COL])
+        
+        # Now format as string
+        save_df[SECTOR_DATE_COL] = save_df[SECTOR_DATE_COL].dt.strftime('%Y-%m-%d')
+        
+        # Rest of the function remains the same...
         # Rename columns to database names
         save_df = save_df.rename(columns=SECTOR_MAPPING)
         
@@ -154,9 +160,6 @@ def save_sector_data(edited_df):
         
         # Convert to records
         records = save_df.to_dict('records')
-        
-        # Debug output
-        st.write("Debug - First record to be saved:", records[0])
         
         # Delete existing records
         supabase.table('sector_weights').delete().neq('id', 0).execute()
